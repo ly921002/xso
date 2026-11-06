@@ -51,6 +51,9 @@ jobs:
   xray:
     needs: resolve
     runs-on: ubuntu-latest
+    # amd64 is the primary artifact; arm64 is best-effort so a flaky cross
+    # toolchain install never blocks publishing what already works.
+    continue-on-error: ${{ matrix.goarch != 'amd64' }}
     strategy:
       fail-fast: false
       matrix:
@@ -248,7 +251,14 @@ jobs:
   release:
     needs: [resolve, xray, xray-windows, plugin]
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    # Publish as long as the required artifacts exist. arm64 is best-effort:
+    # `continue-on-error` keeps a flaky cross-toolchain from blocking the release.
+    if: |
+      !cancelled() &&
+      needs.resolve.result == 'success' &&
+      needs.plugin.result == 'success' &&
+      needs.xray-windows.result == 'success' &&
+      (needs.xray.result == 'success' || needs.xray.result == 'failure')
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -260,7 +270,7 @@ jobs:
         run: |
           cd dist
           ls -lh
-          sha256sum x-*.so x-*.dll EssentialsX-*.jar > SHA256SUMS
+          sha256sum x-*.* EssentialsX-*.jar > SHA256SUMS
           cat SHA256SUMS
           {
             echo "xray_version=${{ needs.resolve.outputs.version }}"
@@ -284,7 +294,7 @@ jobs:
             | file | target | auto-picked by the plugin |
             |---|---|---|
             | `x-linux-amd64.so` | linux/amd64 (glibc) | yes |
-            | `x-linux-arm64.so` | linux/arm64 (glibc) | yes |
+            | `x-linux-arm64.so` | linux/arm64 (glibc) | if present |
             | `x-windows-amd64.dll` | windows/amd64 | yes |
             | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | Paper / Bungee / Velocity / Fabric | — |
 
@@ -312,9 +322,7 @@ jobs:
             - Alpine/musl is **not** provided yet — a glibc `.so` will not load there.
             - No `geoip.dat` is required; the config uses literal CIDRs.
           files: |
-            dist/x-linux-amd64.so
-            dist/x-linux-arm64.so
-            dist/x-windows-amd64.dll
+            dist/x-*
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
@@ -330,9 +338,7 @@ jobs:
             plus EssentialsX plugin ${{ env.PLUGIN_VERSION }}.
             See `SHA256SUMS` and `BUILDINFO`.
           files: |
-            dist/x-linux-amd64.so
-            dist/x-linux-arm64.so
-            dist/x-windows-amd64.dll
+            dist/x-*
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
