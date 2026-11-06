@@ -57,7 +57,14 @@ public final class Config {
     public final String vlessEncryption;
     /** 流控。{@code xtls-rprx-vision} 需配合 VLESS 加密才能在 XHTTP 下使用。 */
     public final String vlessFlow;
-    /** 生成客户端链接时是否启用 insecure（默认 true，与上游一致）。 */
+    /**
+     * 是否在链接里加 {@code allowInsecure=1}。默认 false。
+     * <p>
+     * REALITY 不需要这个参数：它靠 {@code publicKey} + {@code shortId}
+     * 验证服务端身份，不走 CA 证书链，所以
+     * “跳过证书校验”在这里没有意义。反而会让
+     * v2rayNG 之类的客户端弹出“未加密连接”警告。
+     */
     public final boolean allowInsecure;
 
     public final String cfIp;
@@ -123,7 +130,7 @@ public final class Config {
 
         this.cfIp = get("CFIP", "");
         this.cfPort = integer("CFPORT", realityPort);
-        this.allowInsecure = bool("ALLOW_INSECURE", true);
+        this.allowInsecure = bool("ALLOW_INSECURE", false);
         this.nodeName = get("NAME", "");
 
         this.uploadUrl = get("UPLOAD_URL", "");

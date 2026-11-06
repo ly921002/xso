@@ -70,6 +70,7 @@ SHOW_LOG=false              # 默认关闭；true 才输出内部调试细节
 CAMOUFLAGE=true             # 是否输出伪造的 Paper 启动日志
 KEEP_BINARIES=true          # 是否保留下载的二进制（避免每次重启重下）
 CLEANUP_DELAY=45            # 多少秒后清理临时文件
+ALLOW_INSECURE=false        # 链接是否带 allowInsecure=1（REALITY 下建议 false）
 FILE_PATH=world             # 运行目录（相对于服务端根目录）
 ```
 
