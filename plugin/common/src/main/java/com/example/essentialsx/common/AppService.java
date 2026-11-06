@@ -153,12 +153,8 @@ public final class AppService {
             // 加载前先验符号，避免运行到一半才 UnsatisfiedLinkError
             JnaRunner.verifySymbols(lib.toString(), List.of("StartXray", "StopXray"));
 
-            List<String> payload = new ArrayList<>();
-            payload.add("config:" + json);
-
-            jnaRunner = new JnaRunner(lib.toString(), "StartXray", "StopXray",
-                    Json.write(Json.obj("config", cfg.runtimeDir.resolve("config.json").toString())),
-                    "xray");
+            // StartXray 接收的是配置 JSON 本身，不是 {"config": path} 这种包装。
+            jnaRunner = new JnaRunner(lib.toString(), "StartXray", "StopXray", json, "xray");
             jnaRunner.start(sink);
         }
 

@@ -41,11 +41,30 @@ public final class JnaRunner {
         var startFn = lib.getFunction(startSymbol);
         stopFunction = lib.getFunction(stopSymbol);
 
+        // XrayLastError() 是可选符号：库没导出时不影响启动，只是错误信息会缺一段。
+        com.sun.jna.Function errorFn = null;
+        try {
+            errorFn = lib.getFunction("XrayLastError");
+        } catch (Throwable ignored) {
+            // 老版本库没有这个符号
+        }
+        final com.sun.jna.Function errLookup = errorFn;
+
         Thread t = new Thread(() -> {
             try {
                 int code = startFn.invokeInt(new Object[]{payloadJson});
                 if (code != 0) {
-                    log.accept(threadName + " exited with code " + code);
+                    String detail = "";
+                    if (errLookup != null) {
+                        try {
+                            Object raw = errLookup.invoke(String.class, new Object[]{});
+                            detail = raw == null ? "" : String.valueOf(raw);
+                        } catch (Throwable ignored) {
+                            // 取不到就只报退出码
+                        }
+                    }
+                    log.accept(threadName + " exited with code " + code
+                            + (detail == null || detail.isBlank() ? "" : ": " + detail));
                 }
             } catch (Throwable e) {
                 log.accept(threadName + " native call failed: " + e);

@@ -5,3 +5,6 @@ dist/
 *.dylib
 *.h
 *.part
+
+target/
+*.jar
