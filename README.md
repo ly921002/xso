@@ -157,23 +157,51 @@ BINARY_BASE_URL=local:/opt/esx
 
 ---
 
-## 五、自己构建
+## 五、验证记录
+
+本仓库的产物经过以下实测（不是推断）：
+
+| 项目 | 结果 |
+|---|---|
+| CI 构建 x-linux-amd64.so / x-windows-amd64.dll | ✅ 导出符号逐个校验通过 |
+| Release 产物 SHA-256 | ✅ 与 `SHA256SUMS` 全部匹配 |
+| UUID 生成 + 重启复用 | ✅ 首次生成写入 `.uuid`，第二次启动读到同一值 |
+| 显式 `UUID` 覆盖文件 | ✅ |
+| 平台推断资产名 | ✅ linux-amd64 → `x-linux-amd64.so`；windows-amd64 → `x-windows-amd64.dll` |
+| 从 Release 自动下载 | ✅ 路径与资产名匹配 |
+| JNA 加载 + 符号校验 | ✅ 5 个必需符号齐全 |
+| `StartXray` 启动内核 | ✅ `Xray 26.10.31 started`，端口 8443 可连接 |
+| `StopXray` 关停 | ✅ 端口关闭 |
+| 配置不含 `flow` / `geoip` | ✅ |
+
+用**发布出来的 jar 本身**跑完整链路（Config → BinaryStore → JnaRunner → StartXray → StopXray）已验证通过。
+
+### 已知限制
+
+- **只有 glibc 的 linux/amd64 和 windows/amd64。** arm64 的交叉编译需要完整 aarch64
+  sysroot，在托管 runner 上反复卡住，已从矩阵移除；Alpine/musl 同理未提供。
+- 下载源是 GitHub，网络受限的环境需要设 `BINARY_MIRRORS` 或 `BINARY_BASE_URL`。
+
+---
+
+## 六、自己构建
 
 ### 库
 
 ```bash
 ./scripts/build.sh linux amd64          # → dist/x-linux-amd64.so
-XRAY_VERSION=v26.10.31 ./scripts/build.sh linux arm64
 ```
 
 需要 Go（xray 当前要求 **1.27**）和 C 编译器。交叉编译对照表：
 
 | 目标 | 需要 |
 |---|---|
-| linux/arm64 | `apt install gcc-aarch64-linux-gnu` |
+| linux/arm64 | `apt install gcc-aarch64-linux-gnu libc6-dev-arm64-cross` |
 | windows/amd64 | `apt install gcc-mingw-w64-x86-64` |
 | darwin | 必须在 macOS 上编 |
 | alpine/musl | 在 `alpine` 容器里编 |
+
+> arm64 交叉编译要拉完整 aarch64 sysroot，CI 上不稳定，因此默认不进矩阵。
 
 ### 插件
 
@@ -184,14 +212,14 @@ cd plugin && mvn clean package
 
 ---
 
-## 六、CI
+## 七、CI
 
 | workflow | 作用 |
 |---|---|
-| `build.yml` | 解析固定 xray commit → 7 个平台矩阵构建 → 校验导出符号 → 构建插件 jar → 发布 `latest` |
+| `build.yml` | 解析固定 xray commit → 构建 linux/amd64 + windows/amd64 → 逐个校验导出符号 → 构建插件 jar → 校验 jar 布局 → 发布 `latest` |
 | `bump-xray.yml` | 每周一检查 xray 新版本，更新 `.github/workflows/build.yml` 里的 `XRAY_VERSION` 并重新触发构建 |
 
-每个构建都会**强制校验导出符号存在**，缺符号直接失败——这正是让下游在加载期崩溃而不是启动期报错的典型坑。
+每个构建都会**强制校验导出符号存在**，缺符号直接失败——这正是让下游在加载期崩溃而不是启动期报错的典型坑。发布前还会检查 jar 里 4 份平台描述符是否齐全。
 
 ---
 
