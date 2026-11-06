@@ -4,13 +4,22 @@
 // in-process (e.g. from Java via JNA) instead of being run as a separate
 // executable.
 //
-// Build:
+// IMPORTANT — loading a Go c-shared library inside a host process (JVM) is
+// fragile: the Go runtime installs its own signal handlers during
+// initialisation, which can clash with the host's (the JVM installs handlers
+// for SIGSEGV/SIGBUS/SIGILL/SIGTRAP for its own use). On some kernels this
+// shows up as a hard crash inside x_cgo_sigaction before any of our code runs.
 //
-//	CGO_ENABLED=1 go build -buildmode=c-shared -o x.so ./cshared
+// Mitigations applied at build time (see .github/workflows/build.yml):
+//   - GOAMD64=v1 + -march=x86-64, so no AVX/FMA leaks onto older CPUs
+//   - -tags netgo,osusergo, so cgo is not used for DNS/user lookups
+//
+// Mitigations applied at runtime (below): the exported entrypoints keep no Go
+// goroutines of their own and never call into the host's signal machinery.
 //
 // Exported symbols:
 //
-//	int StartXray(const char* configJSON);  // 0 = ok, blocks until StopXray
+//	int StartXray(const char* configJSON);  // 0 = ok
 //	int StopXray(void);                     // 0 = ok
 //	const char* XrayLastError(void);        // last error message, DO NOT free
 //	const char* XrayVersion(void);          // Xray version string

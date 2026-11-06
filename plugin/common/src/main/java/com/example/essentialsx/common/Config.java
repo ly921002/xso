@@ -37,6 +37,19 @@ public final class Config {
     public final String xhttpHost;
     public final String xhttpMode;
 
+    /**
+     * VLESS 加密（decryption 字段）。默认 {@code none}。
+     * <p>
+     * 例：{@code mlkem768x25519plus.native.0rtt.<认证参数>}。
+     * 结构为 {@code 握手方式.流量外观.票据有效期.padding.*.认证参数}，
+     * 服务端与客户端必须一致；末尾认证参数由 {@code xray mlkem768} 生成。
+     */
+    public final String vlessDecryption;
+    /** 流控。{@code xtls-rprx-vision} 需配合 VLESS 加密才能在 XHTTP 下使用。 */
+    public final String vlessFlow;
+    /** 生成客户端链接时是否启用 insecure（默认 true，与上游一致）。 */
+    public final boolean allowInsecure;
+
     public final String cfIp;
     public final int cfPort;
     public final String nodeName;
@@ -88,8 +101,14 @@ public final class Config {
         this.xhttpHost = get("XHTTP_HOST", "");
         this.xhttpMode = get("XHTTP_MODE", "auto");
 
+        // 默认不启用 VLESS 加密，行为与之前一致；启用后必须保证客户端用同一串。
+        this.vlessDecryption = get("VLESS_DECRYPTION", "none");
+        // 默认空 flow。只有启用了 VLESS 加密，XHTTP 才能安全地配 vision。
+        this.vlessFlow = get("VLESS_FLOW", "");
+
         this.cfIp = get("CFIP", "");
         this.cfPort = integer("CFPORT", realityPort);
+        this.allowInsecure = bool("ALLOW_INSECURE", true);
         this.nodeName = get("NAME", "");
 
         this.uploadUrl = get("UPLOAD_URL", "");

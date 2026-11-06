@@ -45,13 +45,21 @@ public final class Subscription {
         int port = config.cfIp.isBlank() ? config.realityPort : config.cfPort;
 
         StringBuilder query = new StringBuilder();
-        query.append("encryption=none");
+        query.append("encryption=").append(urlEncode(
+                config.vlessDecryption.isBlank() ? "none" : config.vlessDecryption));
+        if (!config.vlessFlow.isBlank()) {
+            // vision 只有配合 VLESS 加密时才能在 XHTTP 下使用
+            query.append("&flow=").append(urlEncode(config.vlessFlow));
+        }
         query.append("&security=reality");
         query.append("&sni=").append(urlEncode(config.realitySni));
         query.append("&fp=chrome");
         query.append("&pbk=").append(urlEncode(publicKey));
         if (!config.realityShortId.isBlank()) {
             query.append("&sid=").append(urlEncode(config.realityShortId));
+        }
+        if (config.allowInsecure) {
+            query.append("&allowInsecure=1");
         }
         query.append("&type=xhttp");
         query.append("&path=").append(urlEncode(config.xhttpPath));

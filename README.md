@@ -118,6 +118,70 @@ REALITY_PORT=8443
 也可以完全不写 `.env`，改用进程环境变量（面板的 Startup 变量、systemd `Environment=`、
 Docker `-e`），两者等价，`.env` 优先级更高。
 
+### 可选：VLESS 加密 + xtls-rprx-vision
+
+**先纠正一个常见误解**：`xtls-rprx-vision` 在 XHTTP 下并非绝对不可用。
+
+官方文档写明 XTLS 的适用条件：
+
+- `TCP + TLS/REALITY` — 直接对拷加密数据（TLS 1.3 时）
+- **`VLESS Encryption` — 无底层传输限制**，底层不支持直接对拷时仅穿透 Encryption
+
+也就是说，**没开 VLESS 加密时** flow 只能配 RAW/TCP；**开了 VLESS 加密后** XHTTP 也能配 vision。
+
+#### 两组字符串不能混用
+
+用 `xray vlessenc` 一次生成一对：
+
+```bash
+./xray vlessenc
+```
+
+输出形如：
+
+```
+"decryption": "mlkem768x25519plus.native.600s.qHjEp9pZKvrzZ_NhgKJxaO7SHm2iyFj4uMtZOopFVnA"
+"encryption": "mlkem768x25519plus.native.0rtt.gWjG4gJUE-qqoCroAJxcJmhey4ayjtS-CSeSFFt682Q"
+```
+
+| 位置 | 用哪条 | 说明 |
+|---|---|---|
+| 服务端 `settings.decryption` | `decryption` | 填进 `.env` 的 `VLESS_DECRYPTION` |
+| 客户端链接 `encryption=` | `encryption` | 自动生成到订阅里 |
+
+**两者由同一套种子派生，交叉使用会直接连不上。**
+
+#### 字段结构
+
+`mlkem768x25519plus.native.600s.<认证串>` 由点分隔：
+
+| 块 | 值 | 含义 |
+|---|---|---|
+| 1 | `mlkem768x25519plus` | 握手方式：后量子 ML-KEM-768 + X25519 混合，两端必须一致 |
+| 2 | `native` / `xorpub` / `random` | 流量外观，两端必须一致 |
+| 3 | `600s` / `0rtt` / `100-500s` | 会话票据有效期，**服务端用时长、客户端用 `0rtt`** |
+| 中段 | `100-111-1111.75-0-111...` | padding 混淆，可省略（核心有默认值） |
+| 末段 | 认证参数 | 服务端与客户端各不相同，自动派生 |
+
+#### 配置
+
+```ini
+VLESS_DECRYPTION=mlkem768x25519plus.native.600s.<服务端认证串>
+VLESS_FLOW=xtls-rprx-vision
+```
+
+不填则保持原行为（`decryption=none`、无 flow），订阅链接也相应不带 `flow`。
+
+#### 实测
+
+| 配置 | `xray -test` | 端到端 |
+|---|---|---|
+| 默认（`none`，无 flow） | ✅ Configuration OK | ✅ |
+| 加密 + vision（XHTTP） | ✅ Configuration OK | ✅ `HTTP 204`，0.37s |
+| 把客户端的 `encryption` 串当服务端 `decryption` 用 | ❌ `unsupported "decryption"` | — |
+
+最后一行是实际会踩的坑：客户端串带 `0rtt` 和短认证参数，服务端不认。
+
 ### UUID 是怎么来的
 
 `UUID` 留空时，首次启动会生成一个随机 UUID 并写入工作目录下的 `.uuid`

@@ -33,19 +33,32 @@ public final class XrayConfig {
 
     public String build() {
         List<Object> inbounds = new ArrayList<>();
+
+        Map<String, Object> user = Json.obj(
+                "id", config.uuid,
+                "level", 0
+        );
+        // flow 与 encryption 是联动的一组：
+        //   - 没启用 VLESS Encryption 时，xtls-rprx-vision 只允许 RAW(TCP)+TLS/REALITY；
+        //   - 启用 VLESS Encryption 后不受底层传输限制，XHTTP 也能配 vision。
+        // 空值不输出，避免服务端把它当成"显式要求空 flow"。
+        if (!config.vlessFlow.isBlank()) {
+            user.put("flow", config.vlessFlow);
+        }
+
+        Map<String, Object> settings = Json.obj(
+                "clients", Json.arr(user)
+        );
+        if (!config.vlessDecryption.isBlank()) {
+            settings.put("decryption", config.vlessDecryption);
+        }
+
         inbounds.add(Json.obj(
                 "tag", "vless-xhttp-reality",
                 "protocol", "vless",
                 "listen", "0.0.0.0",
                 "port", config.realityPort,
-                "settings", Json.obj(
-                        "clients", Json.arr(Json.obj(
-                                // 不加 flow：XHTTP + REALITY 下 Vision 不适用
-                                "id", config.uuid,
-                                "level", 0
-                        )),
-                        "decryption", "none"
-                ),
+                "settings", settings,
                 "streamSettings", streamSettings(),
                 "sniffing", Json.obj(
                         "enabled", true,

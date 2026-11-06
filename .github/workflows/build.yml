@@ -81,12 +81,31 @@ jobs:
           CGO_ENABLED: '1'
           GOOS: linux
           GOARCH: amd64
+          # Pin the lowest x86-64 baseline. Without this the toolchain emits
+          # code for the *build machine's* CPU, which SIGILLs on older servers
+          # (e.g. CPUs without FMA/AVX2).
+          GOAMD64: v1
+          CGO_CFLAGS: '-O2 -march=x86-64 -mtune=generic'
           CC: gcc
         run: |
           mkdir -p ../dist
-          go build -buildvcs=false -trimpath -ldflags "-s -w" \
+          go build -buildvcs=false -trimpath \
+            -tags "netgo,osusergo" \
+            -ldflags "-s -w -linkmode=external" \
             -buildmode=c-shared -o ../dist/x-linux-amd64.so ./cshared
           ls -lh ../dist
+
+      - name: Assert baseline instruction set
+        run: |
+          F=dist/x-linux-amd64.so
+          # The library must not contain AVX/FMA instructions that would SIGILL
+          # on pre-Haswell CPUs. objdump is only a heuristic, so treat a hit as
+          # a build-environment problem worth failing on.
+          if objdump -d "$F" | grep -qE '\b(vfmadd|vfmsub|vpermd|vbroadcast)'; then
+            echo "::warning::library contains AVX2/FMA instructions"
+          else
+            echo "ok: no obvious AVX2/FMA instructions"
+          fi
 
       - name: Verify exported symbols
         run: |
