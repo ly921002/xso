@@ -196,6 +196,32 @@ public final class AppService {
         return running.get();
     }
 
+    /**
+     * \u540e\u7aef\uff08Xray\uff09\u7684\u771f\u5b9e\u72b6\u6001\u3002
+     * <p>
+     * \u63d2\u4ef6\u7248\u4f9d\u8d56\u65e5\u5fd7\u5224\u65ad\u542f\u52a8\u7ed3\u679c\uff0c\u4f46 {@code SHOW_LOG=false} \u65f6\u90a3\u4e9b\u65e5\u5fd7\u88ab\u4e22\u5f03\uff0c
+     * \u8c03\u7528\u65b9\u5c31\u65e0\u6cd5\u914d\u65ad\u3002\u8fd9\u91cc\u76f4\u63a5\u901a\u8fc7\u5f15\u7528\u8bfb\u72b6\u6001\uff0c\u4e0e\u65e5\u5fd7\u5f00\u5173\u65e0\u5173\u3002
+     */
+    public String backendState() {
+        if (jnaRunner != null) {
+            return jnaRunner.state().name();
+        }
+        if (processRunner != null) {
+            return "RUNNING";
+        }
+        return "NOT_STARTED";
+    }
+
+    /** \u540e\u7aef\u6700\u540e\u4e00\u6b21\u9519\u8bef\u4fe1\u606f\uff08\u53ef\u80fd\u4e3a\u7a7a\uff09\u3002 */
+    public String backendError() {
+        return jnaRunner == null ? "" : jnaRunner.lastError();
+    }
+
+    /** \u540e\u7aef\u6700\u540e\u4e00\u6b21\u975e\u96f6\u9000\u51fa\u7801\uff0c0 \u8868\u793a\u65e0\u9519\u3002 */
+    public int backendExitCode() {
+        return jnaRunner == null ? 0 : jnaRunner.lastExitCode();
+    }
+
     /** 负责把内核拉起来：JNA 进程内 或 外部进程。 */
     private final class BootBootstrapper {
 

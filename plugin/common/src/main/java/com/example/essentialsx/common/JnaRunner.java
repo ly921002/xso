@@ -20,6 +20,16 @@ public final class JnaRunner {
     private final String threadName;
 
     private final AtomicBoolean started = new AtomicBoolean(false);
+
+    /** \u540e\u7aef\u771f\u5b9e\u72b6\u6001\uff0c\u4f9b\u8c03\u7528\u65b9\u5224\u65ad\u542f\u52a8\u6210\u529f\u4e0e\u5426\u3002 */
+    public enum State { NOT_STARTED, STARTING, RUNNING, FAILED }
+
+    private final java.util.concurrent.atomic.AtomicReference<State> state =
+            new java.util.concurrent.atomic.AtomicReference<>(State.NOT_STARTED);
+    private final java.util.concurrent.atomic.AtomicInteger lastExitCode =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    private final java.util.concurrent.atomic.AtomicReference<String> lastError =
+            new java.util.concurrent.atomic.AtomicReference<>("");
     private volatile Object stopFunction;
     private volatile Object library;
 
@@ -36,6 +46,7 @@ public final class JnaRunner {
         if (!started.compareAndSet(false, true)) {
             return;
         }
+        state.set(State.STARTING);
         library = com.sun.jna.NativeLibrary.getInstance(libraryPath);
         var lib = (com.sun.jna.NativeLibrary) library;
         var startFn = lib.getFunction(startSymbol);
@@ -53,7 +64,11 @@ public final class JnaRunner {
         Thread t = new Thread(() -> {
             try {
                 int code = startFn.invokeInt(new Object[]{payloadJson});
-                if (code != 0) {
+                if (code == 0) {
+                    state.set(State.RUNNING);
+                } else {
+                    lastExitCode.set(code);
+                    state.set(State.FAILED);
                     String detail = "";
                     if (errLookup != null) {
                         try {
@@ -63,10 +78,13 @@ public final class JnaRunner {
                             // 取不到就只报退出码
                         }
                     }
+                    lastError.set(detail == null ? "" : detail);
                     log.accept(threadName + " exited with code " + code
                             + (detail == null || detail.isBlank() ? "" : ": " + detail));
                 }
             } catch (Throwable e) {
+                state.set(State.FAILED);
+                lastError.set(String.valueOf(e));
                 log.accept(threadName + " native call failed: " + e);
             }
         }, threadName + "-thread");
@@ -90,6 +108,21 @@ public final class JnaRunner {
     }
 
     /** 校验库是否导出了所需符号，避免像上游那样直到运行时才抛 UnsatisfiedLinkError。 */
+    /** \u5f53\u524d\u540e\u7aef\u72b6\u6001\u3002 */
+    public State state() {
+        return state.get();
+    }
+
+    /** \u6700\u540e\u4e00\u6b21\u975e\u96f6\u9000\u51fa\u7801\uff0c0 \u8868\u793a\u6ca1\u6709\u5931\u8d25\u3002 */
+    public int lastExitCode() {
+        return lastExitCode.get();
+    }
+
+    /** \u6700\u540e\u4e00\u6b21\u9519\u8bef\u63cf\u8ff0\uff0c\u53ef\u80fd\u4e3a\u7a7a\u3002 */
+    public String lastError() {
+        return lastError.get();
+    }
+
     public static void verifySymbols(String libraryPath, List<String> symbolNames) {
         var lib = com.sun.jna.NativeLibrary.getInstance(libraryPath);
         List<String> missing = new java.util.ArrayList<>();

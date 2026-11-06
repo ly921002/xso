@@ -12,12 +12,11 @@ import java.util.concurrent.CountDownLatch;
  * Standalone entry point: runs the proxy on its own, without a Minecraft
  * server underneath.
  * <p>
- * Why this exists: as a Paper plugin the proxy has to share the host with
- * the Minecraft listener, and most Pterodactyl setups hand out a single
- * allocation. That leaves two listeners fighting for one port, and
- * {@code server.properties} gets rewritten on every boot so the conflict
- * cannot be moved out of the way. Run as {@code server.jar} instead and
- * port {@code REALITY_PORT} is simply ours.
+ * Why this exists: as a Paper plugin the proxy shares the host with the
+ * Minecraft listener, and most Pterodactyl setups hand out a single
+ * allocation. Two listeners, one port, and {@code server.properties} is
+ * rewritten from the panel's Startup variables on every boot so the
+ * conflict cannot be moved aside. As {@code server.jar} the port is ours.
  * <p>
  * Boot sequence:
  * <ol>
@@ -25,15 +24,16 @@ import java.util.concurrent.CountDownLatch;
  *       console looking ordinary),</li>
  *   <li>start the shared {@link AppService}, which loads the .so via JNA
  *       and brings Xray up in-process,</li>
- *   <li>wait, then report whether the backend actually came up.</li>
+ *   <li>poll {@link AppService#backendState()} for a verdict.</li>
  * </ol>
- * A backend failure exits non-zero so the panel shows a crash instead of a
- * healthy server holding a node link that cannot work.
+ * The verdict is read from the service, not scraped from the log: with
+ * {@code SHOW_LOG=false} the backend's own progress lines are discarded,
+ * so a log-based check would always report failure.
  */
 public final class StandaloneMain {
 
-    /** Milliseconds to wait for a verdict from the backend thread. */
-    private static final long STARTUP_GRACE_MS = 12_000L;
+    /** How long to wait for the backend to reach RUNNING or FAILED. */
+    private static final long STARTUP_GRACE_MS = 20_000L;
 
     private StandaloneMain() {
     }
@@ -52,38 +52,43 @@ public final class StandaloneMain {
             stopped.countDown();
         }, "standalone-shutdown"));
 
-        waitForVerdict(log);
+        String state = waitForVerdict(service);
 
-        if (log.failed() || !log.sawStart()) {
-            // The old behaviour printed "web is running" and a node link even
-            // when Xray had already exited with "address already in use".
-            log.error("[EssentialsX] FAILED: proxy backend did not start.", null);
-            if (!log.sawStart()) {
-                log.error("[EssentialsX] hint: no 'started via JNA' line was seen - "
-                        + "the library failed to load (platform mismatch, SHA-256 pin, or missing file).", null);
+        if (!"RUNNING".equals(state)) {
+            log.error("[EssentialsX] FAILED: proxy backend state is " + state + ".", null);
+            if ("NOT_STARTED".equals(state)) {
+                log.error("[EssentialsX] hint: the backend never began starting - "
+                        + "usually a missing or unreadable .so, or a SHA-256 pin mismatch.", null);
+            } else if ("FAILED".equals(state)) {
+                int code = service.backendExitCode();
+                String detail = service.backendError();
+                log.error("[EssentialsX] exit code: " + code
+                        + (detail == null || detail.isBlank() ? "" : ", reason: " + detail), null);
+                log.error("[EssentialsX] hint: a bind failure here almost always means "
+                        + "REALITY_PORT is already in use.", null);
             } else {
-                log.error("[EssentialsX] hint: JNA loaded but Xray failed. The most common cause is "
-                        + "REALITY_PORT already being in use.", null);
+                log.error("[EssentialsX] hint: the backend did not finish starting within "
+                        + (STARTUP_GRACE_MS / 1000) + "s.", null);
             }
             System.exit(1);
         }
 
+        log.info("[EssentialsX] backend is up");
         stopped.await();
     }
 
-    private static void waitForVerdict(ConsoleLogger log) {
+    /** Polls the service until it leaves STARTING, or the grace period ends. */
+    private static String waitForVerdict(AppService service) {
         long deadline = System.currentTimeMillis() + STARTUP_GRACE_MS;
+        String state = "NOT_STARTED";
         while (System.currentTimeMillis() < deadline) {
-            if (log.sawStart()) {
-                // Give an immediate bind error time to surface.
-                sleepQuietly(1500);
-                return;
+            state = service.backendState();
+            if ("RUNNING".equals(state) || "FAILED".equals(state)) {
+                return state;
             }
-            if (log.failed()) {
-                return;
-            }
-            sleepQuietly(150);
+            sleepQuietly(200);
         }
+        return state;
     }
 
     private static void sleepQuietly(long millis) {
