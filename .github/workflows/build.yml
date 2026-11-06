@@ -46,24 +46,14 @@ jobs:
           echo "resolved $VER -> $COMMIT"
 
   # ---------------------------------------------------------------------------
-  # Linux glibc: amd64 (primary) and arm64.
+  # x-linux-amd64.so (glibc). Single Linux artifact for now: cross-compiling
+  # arm64 pulls a full aarch64 sysroot and stalled repeatedly on hosted runners,
+  # so it is deliberately not in the matrix. Add it back once the toolchain
+  # install is reproducible.
   # ---------------------------------------------------------------------------
   xray:
     needs: resolve
     runs-on: ubuntu-latest
-    # amd64 is the primary artifact; arm64 is best-effort so a flaky cross
-    # toolchain install never blocks publishing what already works.
-    continue-on-error: ${{ matrix.goarch != 'amd64' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goarch: amd64
-            cc: gcc
-            pkg: gcc libc6-dev
-          - goarch: arm64
-            cc: aarch64-linux-gnu-gcc
-            pkg: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
     steps:
       - uses: actions/checkout@v4
 
@@ -71,11 +61,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
-
-      - name: Install cross compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ${{ matrix.pkg }}
 
       - name: Checkout xray at pinned commit
         run: |
@@ -90,22 +75,22 @@ jobs:
           mkdir -p xray-src/cshared
           cp cshared/main.go cshared/main_nocgo.go xray-src/cshared/
 
-      - name: Build x-linux-${{ matrix.goarch }}.so
+      - name: Build x-linux-amd64.so
         working-directory: xray-src
         env:
           CGO_ENABLED: '1'
           GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-          CC: ${{ matrix.cc }}
+          GOARCH: amd64
+          CC: gcc
         run: |
           mkdir -p ../dist
           go build -buildvcs=false -trimpath -ldflags "-s -w" \
-            -buildmode=c-shared -o ../dist/x-linux-${{ matrix.goarch }}.so ./cshared
+            -buildmode=c-shared -o ../dist/x-linux-amd64.so ./cshared
           ls -lh ../dist
 
       - name: Verify exported symbols
         run: |
-          F=dist/x-linux-${{ matrix.goarch }}.so
+          F=dist/x-linux-amd64.so
           file "$F"
           MISSING=0
           for s in StartXray StopXray XrayRunning XrayLastError XrayVersion FreeString; do
@@ -121,15 +106,15 @@ jobs:
       - name: Checksum
         run: |
           cd dist
-          sha256sum x-linux-${{ matrix.goarch }}.so > "SHA256SUMS-linux-${{ matrix.goarch }}"
-          cat "SHA256SUMS-linux-${{ matrix.goarch }}"
+          sha256sum x-linux-amd64.so > SHA256SUMS-linux-amd64
+          cat SHA256SUMS-linux-amd64
 
       - uses: actions/upload-artifact@v4
         with:
-          name: x-linux-${{ matrix.goarch }}
+          name: x-linux-amd64
           path: |
-            dist/x-linux-${{ matrix.goarch }}.so
-            dist/SHA256SUMS-linux-${{ matrix.goarch }}
+            dist/x-linux-amd64.so
+            dist/SHA256SUMS-linux-amd64
 
   # ---------------------------------------------------------------------------
   # Windows (MinGW x64). The plugin on Windows needs x-windows-amd64.dll.
@@ -251,14 +236,13 @@ jobs:
   release:
     needs: [resolve, xray, xray-windows, plugin]
     runs-on: ubuntu-latest
-    # Publish as long as the required artifacts exist. arm64 is best-effort:
-    # `continue-on-error` keeps a flaky cross-toolchain from blocking the release.
+    # Publish only when every required artifact built successfully.
     if: |
       !cancelled() &&
       needs.resolve.result == 'success' &&
       needs.plugin.result == 'success' &&
-      needs.xray-windows.result == 'success' &&
-      (needs.xray.result == 'success' || needs.xray.result == 'failure')
+      needs.xray.result == 'success' &&
+      needs.xray-windows.result == 'success'
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -294,7 +278,6 @@ jobs:
             | file | target | auto-picked by the plugin |
             |---|---|---|
             | `x-linux-amd64.so` | linux/amd64 (glibc) | yes |
-            | `x-linux-arm64.so` | linux/arm64 (glibc) | if present |
             | `x-windows-amd64.dll` | windows/amd64 | yes |
             | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | Paper / Bungee / Velocity / Fabric | — |
 
