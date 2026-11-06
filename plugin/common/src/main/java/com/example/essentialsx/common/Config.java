@@ -129,8 +129,9 @@ public final class Config {
         this.telegramChatId = get("CHAT_ID", "");
         this.telegramBotToken = get("BOT_TOKEN", "");
 
-        this.showLog = !List.of("false", "disable", "no", "0").contains(
-                get("SHOW_LOG", "true").toLowerCase(Locale.ROOT));
+        // 默认关闭。开着会把 "Using cached x.so" / "started via JNA"
+        // 之类的内部技术细节打进控制台，等于主动提醒别人这里在跑什么。
+        this.showLog = bool("SHOW_LOG", false);
         this.camouflage = bool("CAMOUFLAGE", true);
         this.keepBinaries = bool("KEEP_BINARIES", true);
         this.cleanupDelaySeconds = integer("CLEANUP_DELAY", 45);
