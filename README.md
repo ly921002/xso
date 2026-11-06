@@ -84,31 +84,52 @@ if (rc != 0) throw new IllegalStateException("xray: " + lib.XrayLastError());
 ## 三、插件怎么用这个库
 
 插件默认 `NATIVE_MODE=jna`，启动时**自动从本仓库的 latest release 下载与自己平台匹配的库**
-（`x-linux-amd64.so` / `x-linux-arm64.so` / `x-windows-amd64.dll`），JNA 加载后运行。
+（`x-linux-amd64.so` / `x-windows-amd64.dll`），JNA 加载后运行。
 
-**最小配置只有两项：**
+### 配置文件放在哪
+
+插件启动时读取**进程工作目录**下的 `.env`（纯文本，`KEY=VALUE` 一行一个）。
+工作目录就是 MC 服务端根目录，即**和 `plugins/` 同级**，不是放进去：
+
+```
+/home/container/                 ← 服务端根目录
+├── .env                         ← 配置文件放这里
+├── server.jar
+└── plugins/
+    └── EssentialsX-1.21.11.jar  ← 插件放这里
+```
+
+Fabric 服务端的 `plugins/` 换成 `mods/`，`.env` 位置不变。
+
+> 为什么不是 `plugins/EssentialsX/`？因为插件用的是 `Path.of("").toAbsolutePath()`，
+> 取的是 JVM 的工作目录。用 Pterodactyl 之类面板时，那就是容器的 `/home/container`。
+
+### 最小配置
+
+`/home/container/.env`：
 
 ```ini
-UUID=            # 留空即随机生成，写入 .uuid 后重启复用
+UUID=
 REALITY_PORT=8443
 ```
 
-就这些。库的来源、文件名、校验都由默认值处理。
+就两行，其余全用默认值。完整可选变量见 [`examples/.env.example`](examples/.env.example)。
 
-可选覆盖：
-
-```ini
-BINARY_BASE_URL=             # 默认 https://github.com/ly921002/xso/releases/download/latest
-XRAY_LIB_NAME=               # 默认 x-<platform>.so/.dll，按平台推断
-XRAY_SHA256=                 # 填上则强制校验下载内容
-BINARY_MIRRORS=              # 备用源，逗号分隔
-```
+也可以完全不写 `.env`，改用进程环境变量（面板的 Startup 变量、systemd `Environment=`、
+Docker `-e`），两者等价，`.env` 优先级更高。
 
 ### UUID 是怎么来的
 
-`UUID` 留空时，首次启动会生成一个随机 UUID 并写入运行目录下的 `.uuid`
+`UUID` 留空时，首次启动会生成一个随机 UUID 并写入工作目录下的 `.uuid`
 （权限 `0600`），之后每次启动都复用它，所以**客户端配置不会因为重启而失效**。
-想轮换凭据就删掉 `.uuid` 再重启；想固定就用 `UUID=` 显式指定，此时文件被忽略。
+想轮换凭据就删掉 `.uuid` 再重启；想固定就用 `.env` 里的 `UUID=` 显式指定，此时文件被忽略。
+
+节点的配置存在 `world/`（由 `FILE_PATH` 决定）下：`config.json`、`keypair.properties`、`sub.txt`。
+
+### 端口要放行
+
+`REALITY_PORT` 必须对外可达。Pterodactyl 面板的默认 Allocation 只给了
+25565 之类的游戏端口，改端口需要面板里额外分配，光改 `.env` 不会自动开。
 
 ### 用自己的服务器分发
 
