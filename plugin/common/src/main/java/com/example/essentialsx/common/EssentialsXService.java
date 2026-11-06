@@ -18,7 +18,10 @@ public final class EssentialsXService {
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        logger.info("EssentialsX service started on " + platformName + ".");
+        // 注意：这里曾经会打印
+        //   "EssentialsX service started on Paper."
+        // 一行里同时暴露插件名和服务端类型；而上游真实的
+        // EssentialsX 根本不会输出这么一行。去掉反而更像真。
         appService.start();
     }
 
@@ -27,7 +30,6 @@ public final class EssentialsXService {
             return;
         }
         appService.stop();
-        logger.info("EssentialsX service stopped on " + platformName + ".");
     }
 
     public boolean isRunning() {
