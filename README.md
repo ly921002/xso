@@ -273,6 +273,19 @@ curl -x http://127.0.0.1:3080 https://api.ipify.org
 
 > 建议清理前先备份：`cp ~/mc/.env ~/backup/ && cp ~/mc/world/keypair.properties ~/backup/`
 
+### 重启后自愈的前提
+
+`CLEANUP_MODE=binaries` 会删掉 `world/x-*.so`，下次启动时插件会去
+`BINARY_BASE_URL` 指向的源重新拿一份。所以：
+
+- `BINARY_BASE_URL=local:/path` 时，该路径里必须保留一份 `.so`，
+  否则重启报 `BINARY_BASE_URL is not set and no cached ... exists`
+- 用远程 URL 时每次重启会重新下载
+- `CLEANUP_MODE=full` 连 `BINARY_BASE_URL` 本身都在 `.env` 里，所以重启后完全需要重新配置
+
+实测（FreeBSD）：full 模式 60 秒后 8 个文件全部消失，
+进程不变、24725 仍监听，新建 VLESS 会话 6/6 返回 HTTP 200。
+
 ---
 
 ## 11. 交付检查表
