@@ -144,12 +144,17 @@ Docker `-e`），两者等价，`.env` 优先级更高。
 "encryption": "mlkem768x25519plus.native.0rtt.gWjG4gJUE-qqoCroAJxcJmhey4ayjtS-CSeSFFt682Q"
 ```
 
-| 位置 | 用哪条 | 说明 |
+| 位置 | 用哪条 | 填到哪 |
 |---|---|---|
-| 服务端 `settings.decryption` | `decryption` | 填进 `.env` 的 `VLESS_DECRYPTION` |
-| 客户端链接 `encryption=` | `encryption` | 自动生成到订阅里 |
+| 服务端 `settings.decryption` | `decryption` | `.env` 的 `VLESS_DECRYPTION` |
+| 客户端链接 `encryption=` | `encryption` | `.env` 的 `VLESS_ENCRYPTION` |
 
-**两者由同一套种子派生，交叉使用会直接连不上。**
+**两者由同一套种子派生，交叉使用会直接连不上**，典型报错是
+`ML-KEM-768 handshake failed > chacha20poly1305: message authentication failed`。
+
+> 旧版本会把服务端的 `decryption` 直接写进订阅链接的 `encryption=`，这是个 bug。
+> 现在链接优先取 `VLESS_ENCRYPTION`；未配置时回退到 `VLESS_DECRYPTION`，
+> 所以只写 `VLESS_DECRYPTION=none` 的老配置行为不变。
 
 #### 字段结构
 
@@ -167,6 +172,7 @@ Docker `-e`），两者等价，`.env` 优先级更高。
 
 ```ini
 VLESS_DECRYPTION=mlkem768x25519plus.native.600s.<服务端认证串>
+VLESS_ENCRYPTION=mlkem768x25519plus.native.0rtt.<客户端认证串>
 VLESS_FLOW=xtls-rprx-vision
 ```
 

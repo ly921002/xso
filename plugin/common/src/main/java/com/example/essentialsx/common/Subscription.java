@@ -45,8 +45,10 @@ public final class Subscription {
         int port = config.cfIp.isBlank() ? config.realityPort : config.cfPort;
 
         StringBuilder query = new StringBuilder();
+        // 链接里必须用「客户端」加密串：与服务端 decryption 成对但内容不同，
+        // 填错会导致 ML-KEM 握手 MAC 校验失败（chacha20poly1305: message authentication failed）。
         query.append("encryption=").append(urlEncode(
-                config.vlessDecryption.isBlank() ? "none" : config.vlessDecryption));
+                config.vlessEncryption.isBlank() ? "none" : config.vlessEncryption));
         if (!config.vlessFlow.isBlank()) {
             // vision 只有配合 VLESS 加密时才能在 XHTTP 下使用
             query.append("&flow=").append(urlEncode(config.vlessFlow));

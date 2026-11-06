@@ -42,9 +42,19 @@ public final class Config {
      * <p>
      * 例：{@code mlkem768x25519plus.native.0rtt.<认证参数>}。
      * 结构为 {@code 握手方式.流量外观.票据有效期.padding.*.认证参数}，
-     * 服务端与客户端必须一致；末尾认证参数由 {@code xray mlkem768} 生成。
+     * 服务端与客户端必须一致；末尾认证参数由 {@code xray vlessenc} 生成。
      */
     public final String vlessDecryption;
+    /**
+     * VLESS 客户端加密串（vless:// 链接里的 {@code encryption=}）。默认取 decryption 的值。
+     * <p>
+     * 与服务端的 {@link #vlessDecryption} <b>不是同一个字符串</b>：两者由
+     * {@code xray vlessenc} 一次生成，服务端串带 {@code 600s} 之类的票据时长，
+     * 客户端串带 {@code 0rtt}。交叉使用会握手失败（MAC 校验不通过）。
+     * <p>
+     * 留空时回退到 {@code VLESS_DECRYPTION}，以兼容旧配置；启用 VLESS 加密时应显式填写。
+     */
+    public final String vlessEncryption;
     /** 流控。{@code xtls-rprx-vision} 需配合 VLESS 加密才能在 XHTTP 下使用。 */
     public final String vlessFlow;
     /** 生成客户端链接时是否启用 insecure（默认 true，与上游一致）。 */
@@ -103,6 +113,9 @@ public final class Config {
 
         // 默认不启用 VLESS 加密，行为与之前一致；启用后必须保证客户端用同一串。
         this.vlessDecryption = get("VLESS_DECRYPTION", "none");
+        // 客户端串与服务端串成对生成但内容不同；未显式配置时回退到 decryption，
+        // 保持 VLESS_DECRYPTION=none 的旧行为完全不变。
+        this.vlessEncryption = get("VLESS_ENCRYPTION", vlessDecryption);
         // 默认空 flow。只有启用了 VLESS 加密，XHTTP 才能安全地配 vision。
         this.vlessFlow = get("VLESS_FLOW", "");
 
