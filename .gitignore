@@ -1,0 +1,7 @@
+dist/
+.work/
+*.so
+*.dll
+*.dylib
+*.h
+*.part

@@ -1,0 +1,52 @@
+{
+  "log": { "loglevel": "warning", "access": "" },
+  "inbounds": [
+    {
+      "tag": "vless-xhttp-reality",
+      "protocol": "vless",
+      "listen": "0.0.0.0",
+      "port": 8443,
+      "settings": {
+        "clients": [{ "id": "REPLACE-WITH-YOUR-UUID", "level": 0 }],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "xhttpSettings": { "path": "/assets/bundle.js", "mode": "auto" },
+        "realitySettings": {
+          "show": false,
+          "target": "www.iij.ad.jp:443",
+          "xver": 0,
+          "serverNames": ["www.iij.ad.jp"],
+          "privateKey": "REPLACE-WITH-X25519-PRIVATE-KEY",
+          "shortIds": [""]
+        }
+      },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
+    }
+  ],
+  "outbounds": [
+    { "tag": "freedom", "protocol": "freedom" },
+    { "tag": "block", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "ip": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "127.0.0.0/8",
+          "169.254.0.0/16",
+          "::1/128",
+          "fc00::/7",
+          "fe80::/10"
+        ],
+        "outboundTag": "block"
+      }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.java text eol=lf
+*.go text eol=lf
+*.so binary
+*.dll binary
+*.dylib binary
+*.jar binary
