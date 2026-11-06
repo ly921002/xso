@@ -57,10 +57,10 @@ jobs:
         include:
           - goarch: amd64
             cc: gcc
-            pkg: gcc
+            pkg: gcc libc6-dev
           - goarch: arm64
             cc: aarch64-linux-gnu-gcc
-            pkg: gcc-aarch64-linux-gnu
+            pkg: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
     steps:
       - uses: actions/checkout@v4
 
@@ -161,7 +161,7 @@ jobs:
           install: mingw-w64-x86_64-gcc
 
       - name: Build x-windows-amd64.dll
-        shell: msys2 {0}
+        shell: bash
         working-directory: xray-src
         env:
           CGO_ENABLED: '1'
@@ -169,8 +169,15 @@ jobs:
           GOARCH: amd64
           CC: gcc
         run: |
+          # The MSYS2 shell replaces PATH, so resolve go.exe explicitly from the
+          # toolchain setup-go installed instead of relying on PATH.
+          GOEXE="$(ls -d /d/hostedtoolcache/windows/go/*/x64/bin/go.exe 2>/dev/null | tail -1)"
+          echo "using go: ${GOEXE}"
+          test -x "$GOEXE"
+          which gcc
+          gcc --version | head -1
           mkdir -p ../dist
-          go build -buildvcs=false -trimpath -ldflags "-s -w" \
+          "$GOEXE" build -buildvcs=false -trimpath -ldflags "-s -w" \
             -buildmode=c-shared -o ../dist/x-windows-amd64.dll ./cshared
           ls -lh ../dist
 
