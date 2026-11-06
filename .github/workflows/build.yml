@@ -1,4 +1,4 @@
-name: Build x.so libraries and EssentialsX plugin
+name: Build x.so and EssentialsX plugin
 
 on:
   push:
@@ -25,7 +25,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Resolve the xray commit once so every matrix leg builds identical source.
+  # Resolve the xray commit once so the build is reproducible.
   # ---------------------------------------------------------------------------
   resolve:
     runs-on: ubuntu-latest
@@ -46,21 +46,11 @@ jobs:
           echo "resolved $VER -> $COMMIT"
 
   # ---------------------------------------------------------------------------
-  # Linux glibc, amd64 + arm64.
+  # x-linux-amd64.so (glibc).
   # ---------------------------------------------------------------------------
-  linux:
+  xray:
     needs: resolve
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goarch: amd64
-            cc: gcc
-            pkg: gcc
-          - goarch: arm64
-            cc: aarch64-linux-gnu-gcc
-            pkg: gcc-aarch64-linux-gnu
     steps:
       - uses: actions/checkout@v4
 
@@ -68,11 +58,6 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
-
-      - name: Install cross compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ${{ matrix.pkg }}
 
       - name: Checkout xray at pinned commit
         run: |
@@ -87,219 +72,46 @@ jobs:
           mkdir -p xray-src/cshared
           cp cshared/main.go cshared/main_nocgo.go xray-src/cshared/
 
-      - name: Build x.so
+      - name: Build x-linux-amd64.so
         working-directory: xray-src
         env:
           CGO_ENABLED: '1'
           GOOS: linux
-          GOARCH: ${{ matrix.goarch }}
-          CC: ${{ matrix.cc }}
-        run: |
-          mkdir -p ../dist
-          go build -buildvcs=false -trimpath -ldflags "-s -w" \
-            -buildmode=c-shared -o ../dist/x-linux-${{ matrix.goarch }}.so ./cshared
-
-      - name: Verify exported symbols
-        run: |
-          F=dist/x-linux-${{ matrix.goarch }}.so
-          file "$F"
-          for s in StartXray StopXray XrayRunning XrayLastError XrayVersion FreeString; do
-            if ! nm -D --defined-only "$F" | grep -qw "$s"; then
-              echo "MISSING SYMBOL: $s"; exit 1
-            fi
-            echo "ok: $s"
-          done
-
-      - name: Record checksums
-        run: |
-          cd dist
-          sha256sum ./*.so > "SHA256SUMS-linux-${{ matrix.goarch }}"
-          cat "SHA256SUMS-linux-${{ matrix.goarch }}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: x-linux-${{ matrix.goarch }}
-          path: |
-            dist/x-linux-${{ matrix.goarch }}.so
-            dist/SHA256SUMS-linux-${{ matrix.goarch }}
-
-  # ---------------------------------------------------------------------------
-  # Alpine / musl. A glibc .so cannot be dlopen'd on Alpine, so this needs its
-  # own build inside a musl container.
-  # ---------------------------------------------------------------------------
-  linux-musl:
-    needs: resolve
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goarch: amd64
-            img: alpine:3.20
-          - goarch: arm64
-            img: arm64v8/alpine:3.20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
-
-      - name: Build inside alpine
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src "${{ matrix.img }}" sh -c '
-            set -e
-            apk add --no-cache go git gcc musl-dev binutils
-            git init xray-src
-            cd xray-src
-            git remote add origin https://github.com/XTLS/Xray-core.git
-            git fetch --depth 1 origin ${{ needs.resolve.outputs.commit }}
-            git checkout FETCH_HEAD
-            mkdir -p cshared
-            cp ../cshared/main.go ../cshared/main_nocgo.go cshared/
-            mkdir -p ../dist
-            CGO_ENABLED=1 GOOS=linux GOARCH=${{ matrix.goarch }} GOTOOLCHAIN=local \
-              go build -buildvcs=false -trimpath -ldflags "-s -w" \
-              -buildmode=c-shared -o ../dist/x-linux-musl-${{ matrix.goarch }}.so ./cshared
-            cd ..
-            for s in StartXray StopXray FreeString; do
-              nm -D --defined-only dist/x-linux-musl-${{ matrix.goarch }}.so | grep -qw "$s" || { echo "MISSING $s"; exit 1; }
-              echo "ok: $s"
-            done
-            sha256sum dist/x-linux-musl-${{ matrix.goarch }}.so > dist/SHA256SUMS-linux-musl-${{ matrix.goarch }}
-            cat dist/SHA256SUMS-linux-musl-${{ matrix.goarch }}
-          '
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: x-linux-musl-${{ matrix.goarch }}
-          path: |
-            dist/x-linux-musl-${{ matrix.goarch }}.so
-            dist/SHA256SUMS-linux-musl-${{ matrix.goarch }}
-
-  # ---------------------------------------------------------------------------
-  # Windows (MinGW) and macOS (native clang).
-  # ---------------------------------------------------------------------------
-  windows:
-    needs: resolve
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
-
-      - name: Checkout xray
-        shell: bash
-        run: |
-          git init xray-src
-          cd xray-src
-          git remote add origin https://github.com/XTLS/Xray-core.git
-          git fetch --depth 1 origin ${{ needs.resolve.outputs.commit }}
-          git checkout FETCH_HEAD
-          mkdir -p cshared
-          cp ../cshared/main.go ../cshared/main_nocgo.go cshared/
-
-      - name: Install MinGW
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: mingw-w64-x86_64-gcc
-
-      - name: Build x.dll
-        shell: msys2 {0}
-        working-directory: xray-src
-        env:
-          CGO_ENABLED: '1'
-          GOOS: windows
           GOARCH: amd64
           CC: gcc
         run: |
           mkdir -p ../dist
           go build -buildvcs=false -trimpath -ldflags "-s -w" \
-            -buildmode=c-shared -o ../dist/x-windows-amd64.dll ./cshared
+            -buildmode=c-shared -o ../dist/x-linux-amd64.so ./cshared
           ls -lh ../dist
 
-      - name: Verify and checksum
-        shell: bash
+      - name: Verify exported symbols
         run: |
-          python - <<'PY'
-          p = "dist/x-windows-amd64.dll"
-          d = open(p, 'rb').read()
-          for s in [b'StartXray', b'StopXray', b'XrayRunning', b'XrayLastError', b'XrayVersion', b'FreeString']:
-              assert s in d, f"missing {s!r}"
-              print("ok:", s.decode())
-          PY
-          cd dist
-          sha256sum ./*.dll > SHA256SUMS-windows-amd64
-          cat SHA256SUMS-windows-amd64
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: x-windows-amd64
-          path: |
-            dist/x-windows-amd64.dll
-            dist/SHA256SUMS-windows-amd64
-
-  darwin:
-    needs: resolve
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-13
-            goarch: amd64
-          - runner: macos-14
-            goarch: arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
-
-      - name: Checkout xray
-        run: |
-          git init xray-src
-          cd xray-src
-          git remote add origin https://github.com/XTLS/Xray-core.git
-          git fetch --depth 1 origin ${{ needs.resolve.outputs.commit }}
-          git checkout FETCH_HEAD
-          mkdir -p cshared
-          cp ../cshared/main.go ../cshared/main_nocgo.go cshared/
-
-      - name: Build x.dylib
-        working-directory: xray-src
-        env:
-          CGO_ENABLED: '1'
-          GOOS: darwin
-          GOARCH: ${{ matrix.goarch }}
-        run: |
-          mkdir -p ../dist
-          go build -buildvcs=false -trimpath -ldflags "-s -w" \
-            -buildmode=c-shared -o ../dist/x-darwin-${{ matrix.goarch }}.dylib ./cshared
-
-      - name: Verify and checksum
-        run: |
-          F=dist/x-darwin-${{ matrix.goarch }}.dylib
+          F=dist/x-linux-amd64.so
           file "$F"
-          for s in StartXray StopXray FreeString; do
-            nm -gU "$F" | grep -qw "_$s" || { echo "MISSING $s"; exit 1; }
-            echo "ok: $s"
+          MISSING=0
+          for s in StartXray StopXray XrayRunning XrayLastError XrayVersion FreeString; do
+            if nm -D --defined-only "$F" | grep -qw "$s"; then
+              echo "ok: $s"
+            else
+              echo "MISSING SYMBOL: $s"
+              MISSING=1
+            fi
           done
+          test "$MISSING" -eq 0
+
+      - name: Checksum
+        run: |
           cd dist
-          shasum -a 256 ./x-darwin-${{ matrix.goarch }}.dylib > SHA256SUMS-darwin-${{ matrix.goarch }}
-          cat SHA256SUMS-darwin-${{ matrix.goarch }}
+          sha256sum x-linux-amd64.so > SHA256SUMS
+          cat SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
-          name: x-darwin-${{ matrix.goarch }}
+          name: xray-lib
           path: |
-            dist/x-darwin-${{ matrix.goarch }}.dylib
-            dist/SHA256SUMS-darwin-${{ matrix.goarch }}
+            dist/x-linux-amd64.so
+            dist/SHA256SUMS
 
   # ---------------------------------------------------------------------------
   # The multi-platform MC plugin (Paper / Bungee / Velocity / Fabric in one jar).
@@ -325,13 +137,15 @@ jobs:
           cp plugin/universal/target/EssentialsX-*.jar "dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar"
           ls -lh dist/
 
-      - name: Inspect jar
+      - name: Verify jar layout
         run: |
           J="dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar"
-          unzip -l "$J" | grep -E 'plugin.yml|bungee.yml|fabric.mod.json|velocity-plugin.json' || {
-            echo "missing a platform descriptor"; exit 1; }
-          unzip -l "$J" | grep -q 'com/example/essentialsx/common/AppService.class' || {
-            echo "missing AppService"; exit 1; }
+          for f in plugin.yml bungee.yml fabric.mod.json velocity-plugin.json; do
+            unzip -l "$J" | grep -q " $f" || { echo "missing $f"; exit 1; }
+            echo "ok: $f"
+          done
+          unzip -l "$J" | grep -q 'com/example/essentialsx/common/AppService.class' \
+            || { echo "missing AppService"; exit 1; }
           echo "jar layout ok"
 
       - uses: actions/upload-artifact@v4
@@ -340,16 +154,14 @@ jobs:
           path: dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
 
   # ---------------------------------------------------------------------------
-  # Publish everything as a rolling "latest" release (+ versioned on tags).
+  # Publish x-linux-amd64.so + EssentialsX-<ver>.jar as a rolling release.
   # ---------------------------------------------------------------------------
   release:
-    needs: [resolve, linux, linux-musl, windows, darwin, plugin]
+    needs: [resolve, xray, plugin]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
@@ -358,10 +170,8 @@ jobs:
       - name: Assemble release
         run: |
           cd dist
-          rm -f SHA256SUMS
-          sha256sum ./*.so ./*.dll ./*.dylib ./*.jar > SHA256SUMS
           ls -lh
-          echo "----- SHA256SUMS -----"
+          sha256sum x-linux-amd64.so EssentialsX-*.jar > SHA256SUMS
           cat SHA256SUMS
           {
             echo "xray_version=${{ needs.resolve.outputs.version }}"
@@ -385,12 +195,6 @@ jobs:
             | file | target | notes |
             |---|---|---|
             | `x-linux-amd64.so` | linux/amd64 | glibc |
-            | `x-linux-arm64.so` | linux/arm64 | glibc |
-            | `x-linux-musl-amd64.so` | linux/amd64 | Alpine / musl |
-            | `x-linux-musl-arm64.so` | linux/arm64 | Alpine / musl |
-            | `x-windows-amd64.dll` | windows/amd64 | MinGW |
-            | `x-darwin-amd64.dylib` | darwin/amd64 | Intel |
-            | `x-darwin-arm64.dylib` | darwin/arm64 | Apple Silicon |
             | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | all | Paper / Bungee / Velocity / Fabric |
 
             Verify with `SHA256SUMS`; `BUILDINFO` records the xray commit.
@@ -398,13 +202,23 @@ jobs:
             Exported symbols: `StartXray`, `StopXray`, `XrayRunning`,
             `XrayLastError`, `XrayVersion`, `FreeString`.
 
-            Plugin setup: put the right `x.so` on your own server, then set
-            `BINARY_BASE_URL`, `XRAY_LIB_NAME=x.so` and `XRAY_SHA256`.
+            **Plugin setup**
+
+            ```ini
+            BINARY_BASE_URL=https://your-host/esx   # 根目录下放 linux-amd64/x.so
+            XRAY_LIB_NAME=x.so
+            XRAY_SHA256=<from SHA256SUMS>
+            UUID=<your client uuid>
+            REALITY_PORT=8443
+            ```
+
+            Startup checklist:
+            - run on a **glibc** host (Alpine/musl needs a musl build);
+            - `XRAY_LIB_NAME` must match the file on disk;
+            - no `geoip.dat` is needed — the bundled config uses literal CIDRs.
           files: |
-            dist/*.so
-            dist/*.dll
-            dist/*.dylib
-            dist/*.jar
+            dist/x-linux-amd64.so
+            dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
 
@@ -419,9 +233,7 @@ jobs:
             plus EssentialsX plugin ${{ env.PLUGIN_VERSION }}.
             See `SHA256SUMS` and `BUILDINFO`.
           files: |
-            dist/*.so
-            dist/*.dll
-            dist/*.dylib
-            dist/*.jar
+            dist/x-linux-amd64.so
+            dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
