@@ -15,25 +15,24 @@
 
 打开 **Releases → Latest build**：
 
-| 文件 | 目标平台 | libc | 用途 |
-|---|---|---|---|
-| `x-linux-amd64.so` | linux/amd64 | glibc | 插件 `XRAY_LIB_NAME=x.so` |
-| `x-linux-arm64.so` | linux/arm64 | glibc | |
-| `x-linux-musl-amd64.so` | linux/amd64 | **Alpine / musl** | Alpine 容器必须用这个 |
-| `x-linux-musl-arm64.so` | linux/arm64 | **Alpine / musl** | |
-| `x-windows-amd64.dll` | windows/amd64 | MinGW | |
-| `x-darwin-amd64.dylib` | darwin/amd64 | — | |
-| `x-darwin-arm64.dylib` | darwin/arm64 | — | |
-| `EssentialsX-1.21.11.jar` | 全平台通用 | — | 插件本体 |
-| `SHA256SUMS` / `BUILDINFO` | — | — | 校验与来源溯源 |
+| 文件 | 目标平台 | 插件是否自动选择 |
+|---|---|---|
+| `x-linux-amd64.so` | linux/amd64（glibc） | 是 |
+| `x-linux-arm64.so` | linux/arm64（glibc） | 是 |
+| `x-windows-amd64.dll` | windows/amd64 | 是 |
+| `EssentialsX-1.21.11.jar` | Paper / Bungee / Velocity / Fabric 通用 | — |
+| `SHA256SUMS` / `BUILDINFO` | 校验与来源溯源 | — |
+
+**插件会按自己的平台自动挑选对应资产**，从 `latest` release 直接下载，
+再用 `SHA256SUMS` 校验，你不需要手动准备任何文件。
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
 cat BUILDINFO          # 这份产物对应哪个 xray commit
 ```
 
-> **glibc 与 musl 不可混用。** glibc 编出来的 `.so` 在 Alpine 上 `dlopen` 会报
-> `Error loading shared library: not found`。Alpine 请用 `x-linux-musl-*`。
+> Alpine / musl 暂未提供。glibc 编出来的 `.so` 在 Alpine 上 `dlopen` 会报
+> `Error loading shared library: not found`，需要另编 musl 版本。
 
 ---
 
@@ -84,31 +83,53 @@ if (rc != 0) throw new IllegalStateException("xray: " + lib.XrayLastError());
 
 ## 三、插件怎么用这个库
 
-插件（`plugin/`）默认 `NATIVE_MODE=jna`，启动时从 `BINARY_BASE_URL` 拉取与自己平台匹配的
-`x.so`，校验 `XRAY_SHA256` 后 JNA 加载。
+插件默认 `NATIVE_MODE=jna`，启动时**自动从本仓库的 latest release 下载与自己平台匹配的库**
+（`x-linux-amd64.so` / `x-linux-arm64.so` / `x-windows-amd64.dll`），JNA 加载后运行。
 
-最小配置：
+**最小配置只有两项：**
 
 ```ini
-BINARY_BASE_URL=https://dl.example.com/esx     # 你自己的服务器，根目录下放 linux-amd64/x.so
-XRAY_LIB_NAME=x.so
-XRAY_SHA256=<来自 SHA256SUMS>
-UUID=<你的客户端 UUID>
+UUID=            # 留空即随机生成，写入 .uuid 后重启复用
 REALITY_PORT=8443
 ```
 
-目录约定（插件先找平台子目录，再回退扁平目录）：
+就这些。库的来源、文件名、校验都由默认值处理。
+
+可选覆盖：
+
+```ini
+BINARY_BASE_URL=             # 默认 https://github.com/ly921002/xso/releases/download/latest
+XRAY_LIB_NAME=               # 默认 x-<platform>.so/.dll，按平台推断
+XRAY_SHA256=                 # 填上则强制校验下载内容
+BINARY_MIRRORS=              # 备用源，逗号分隔
+```
+
+### UUID 是怎么来的
+
+`UUID` 留空时，首次启动会生成一个随机 UUID 并写入运行目录下的 `.uuid`
+（权限 `0600`），之后每次启动都复用它，所以**客户端配置不会因为重启而失效**。
+想轮换凭据就删掉 `.uuid` 再重启；想固定就用 `UUID=` 显式指定，此时文件被忽略。
+
+### 用自己的服务器分发
+
+不想走 GitHub 也可以：
+
+```ini
+BINARY_BASE_URL=https://your-host/esx   # 根目录下放 linux-amd64/x-linux-amd64.so
+```
+
+目录约定（先找平台子目录，再回退扁平目录）：
 
 ```
 /var/www/esx/
 ├── linux-amd64/
-│   └── x.so
+│   └── x-linux-amd64.so
 ├── linux-arm64/
-│   └── x.so
-└── x.so                 # 可选，所有平台共用
+│   └── x-linux-arm64.so
+└── x-linux-amd64.so      # 可选，扁平兜底
 ```
 
-也可以直接指向一个本地目录，省掉 HTTP：
+也可以直接指向本地目录，省掉 HTTP：
 
 ```ini
 BINARY_BASE_URL=local:/opt/esx

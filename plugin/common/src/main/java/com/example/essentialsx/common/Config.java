@@ -53,9 +53,13 @@ public final class Config {
     public final boolean keepBinaries;
     public final int cleanupDelaySeconds;
 
-    // --- 二进制来源（必须是自己服务器）---
+    // --- 二进制来源 ---
+    /** 自定义来源（优先级最高）。留空则使用内置的 GitHub Releases 地址。 */
     public final String binaryBaseUrl;
     public final List<String> binaryMirrors;
+    /** 内置默认来源：本仓库的 latest release。 */
+    public static final String DEFAULT_BINARY_BASE_URL =
+            "https://github.com/ly921002/xso/releases/download/latest";
     public final String xrayLibName;
     public final String xraySha256;
     public final String nativeMode;
@@ -72,7 +76,7 @@ public final class Config {
     public Config(Map<String, String> dotEnv) {
         this.dotEnv = dotEnv;
 
-        this.uuid = requireUuid(get("UUID", ""));
+        this.uuid = requireUuid(get("UUID", ""), Path.of("").toAbsolutePath());
         this.runtimeDirName = get("FILE_PATH", "world");
         this.runtimeDir = Path.of("").toAbsolutePath().resolve(runtimeDirName).normalize();
 
@@ -99,9 +103,10 @@ public final class Config {
         this.keepBinaries = bool("KEEP_BINARIES", true);
         this.cleanupDelaySeconds = integer("CLEANUP_DELAY", 45);
 
-        this.binaryBaseUrl = get("BINARY_BASE_URL", "");
+        this.binaryBaseUrl = get("BINARY_BASE_URL", DEFAULT_BINARY_BASE_URL);
         this.binaryMirrors = splitList(get("BINARY_MIRRORS", ""));
-        this.xrayLibName = get("XRAY_LIB_NAME", "sbx.so");
+        // 默认与 CI 产物同名：x-linux-amd64.so / x-windows-amd64.dll / x-darwin-arm64.dylib
+        this.xrayLibName = get("XRAY_LIB_NAME", "x-" + platform() + librarySuffix());
         this.xraySha256 = get("XRAY_SHA256", "");
         this.nativeMode = get("NATIVE_MODE", "jna").toLowerCase(Locale.ROOT);
         this.xrayBinary = get("XRAY_BINARY", "");
@@ -196,13 +201,56 @@ public final class Config {
         return p.startsWith("windows") ? ".dll" : p.startsWith("darwin") ? ".dylib" : ".so";
     }
 
-    private static String requireUuid(String raw) {
-        if (raw.isBlank()) {
-            String generated = java.util.UUID.randomUUID().toString();
-            System.err.println("[EssentialsX] UUID is empty, generated a random one for this run: " + generated);
-            return generated;
+    /**
+     * UUID 解析顺序：环境变量 &gt; 已持久化的 .uuid 文件 &gt; 首次随机生成。
+     * <p>
+     * 生成后会写回 {@code .uuid}，保证重启后客户端配置不会失效；文件只写入一次，
+     * 之后始终复用。删掉该文件即可轮换凭据。
+     */
+    private static String requireUuid(String raw, Path root) {
+        if (!raw.isBlank()) {
+            return raw.trim();
         }
-        return raw.trim();
+
+        Path store = root.resolve(".uuid").normalize();
+        if (Files.isRegularFile(store)) {
+            try {
+                String saved = Files.readString(store, java.nio.charset.StandardCharsets.UTF_8).trim();
+                if (isValidUuid(saved)) {
+                    return saved;
+                }
+                System.err.println("[EssentialsX] " + store + " does not contain a valid UUID, regenerating");
+            } catch (IOException e) {
+                System.err.println("[EssentialsX] could not read " + store + ": " + e.getMessage());
+            }
+        }
+
+        String generated = java.util.UUID.randomUUID().toString();
+        try {
+            Files.writeString(store, generated + System.lineSeparator(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            // 仅所有者可读：这个值等同于客户端凭据
+            try {
+                Files.setPosixFilePermissions(store,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException | IOException ignored) {
+                // Windows 上没有 POSIX 权限，忽略
+            }
+            System.err.println("[EssentialsX] UUID is empty, generated and persisted to "
+                    + store + ": " + generated);
+        } catch (IOException e) {
+            System.err.println("[EssentialsX] UUID is empty, generated a random one for this run only"
+                    + " (could not persist to " + store + ": " + e.getMessage() + "): " + generated);
+        }
+        return generated;
+    }
+
+    private static boolean isValidUuid(String value) {
+        if (value.length() < 8 || value.length() > 128 || value.contains(" ")) {
+            return false;
+        }
+        // 允许标准 UUID，也允许自定义的任意短标识
+        return value.matches("[A-Za-z0-9-]+");
     }
 
     public static Map<String, String> readDotEnv() {

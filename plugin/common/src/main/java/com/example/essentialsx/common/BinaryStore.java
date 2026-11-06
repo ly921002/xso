@@ -86,11 +86,14 @@ public final class BinaryStore {
     }
 
     /**
-     * 支持两种写法：
+     * 支持三种写法：
      * <ul>
-     *   <li>{@code https://host/dir}  → host/dir/{platform}/{file}，再回退 host/dir/{file}</li>
+     *   <li>{@code https://host/dir}  → 依次尝试 host/dir/{platform}/{file}、host/dir/{file}</li>
+     *   <li>{@code https://.../releases/download/latest} → 扁平名，直接用 host/dir/{file}</li>
      *   <li>{@code local:/opt/esx}   → 直接复制本地文件</li>
      * </ul>
+     * GitHub Releases 的资产是扁平命名（{@code x-linux-amd64.so}），所以扁平路径必须在前，
+     * 否则会先撞一个 404 再去取兜底地址，白白多一次往返。
      */
     private void addSource(List<String> urls, String base, String fileName) {
         if (base.startsWith("local:")) {
@@ -98,8 +101,21 @@ public final class BinaryStore {
             return;
         }
         String root = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        if (root.contains("/releases/download/")) {
+            // Release 资产：只有扁平命名
+            urls.add(root + "/" + fileName);
+            return;
+        }
         urls.add(root + "/" + Config.platform() + "/" + fileName);
         urls.add(root + "/" + fileName);
+    }
+
+    /**
+     * 按平台推断 release 资产名。构建产物由 CI 命名为
+     * {@code x-<os>-<arch>.so|.dll|.dylib}，与 {@link Config#platform()} 的取值一致。
+     */
+    public static String defaultAssetName() {
+        return "x-" + Config.platform() + Config.librarySuffix();
     }
 
     private void fetch(String url, Path target) throws IOException {

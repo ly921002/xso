@@ -46,11 +46,21 @@ jobs:
           echo "resolved $VER -> $COMMIT"
 
   # ---------------------------------------------------------------------------
-  # x-linux-amd64.so (glibc).
+  # Linux glibc: amd64 (primary) and arm64.
   # ---------------------------------------------------------------------------
   xray:
     needs: resolve
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            cc: gcc
+            pkg: gcc
+          - goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            pkg: gcc-aarch64-linux-gnu
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +68,11 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
+
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.pkg }}
 
       - name: Checkout xray at pinned commit
         run: |
@@ -72,22 +87,22 @@ jobs:
           mkdir -p xray-src/cshared
           cp cshared/main.go cshared/main_nocgo.go xray-src/cshared/
 
-      - name: Build x-linux-amd64.so
+      - name: Build x-linux-${{ matrix.goarch }}.so
         working-directory: xray-src
         env:
           CGO_ENABLED: '1'
           GOOS: linux
-          GOARCH: amd64
-          CC: gcc
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
         run: |
           mkdir -p ../dist
           go build -buildvcs=false -trimpath -ldflags "-s -w" \
-            -buildmode=c-shared -o ../dist/x-linux-amd64.so ./cshared
+            -buildmode=c-shared -o ../dist/x-linux-${{ matrix.goarch }}.so ./cshared
           ls -lh ../dist
 
       - name: Verify exported symbols
         run: |
-          F=dist/x-linux-amd64.so
+          F=dist/x-linux-${{ matrix.goarch }}.so
           file "$F"
           MISSING=0
           for s in StartXray StopXray XrayRunning XrayLastError XrayVersion FreeString; do
@@ -103,15 +118,82 @@ jobs:
       - name: Checksum
         run: |
           cd dist
-          sha256sum x-linux-amd64.so > SHA256SUMS
-          cat SHA256SUMS
+          sha256sum x-linux-${{ matrix.goarch }}.so > "SHA256SUMS-linux-${{ matrix.goarch }}"
+          cat "SHA256SUMS-linux-${{ matrix.goarch }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: xray-lib
+          name: x-linux-${{ matrix.goarch }}
           path: |
-            dist/x-linux-amd64.so
-            dist/SHA256SUMS
+            dist/x-linux-${{ matrix.goarch }}.so
+            dist/SHA256SUMS-linux-${{ matrix.goarch }}
+
+  # ---------------------------------------------------------------------------
+  # Windows (MinGW x64). The plugin on Windows needs x-windows-amd64.dll.
+  # ---------------------------------------------------------------------------
+  xray-windows:
+    needs: resolve
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Checkout xray
+        shell: bash
+        run: |
+          git init xray-src
+          cd xray-src
+          git remote add origin https://github.com/XTLS/Xray-core.git
+          git fetch --depth 1 origin ${{ needs.resolve.outputs.commit }}
+          git checkout FETCH_HEAD
+          mkdir -p cshared
+          cp ../cshared/main.go ../cshared/main_nocgo.go cshared/
+
+      - name: Install MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Build x-windows-amd64.dll
+        shell: msys2 {0}
+        working-directory: xray-src
+        env:
+          CGO_ENABLED: '1'
+          GOOS: windows
+          GOARCH: amd64
+          CC: gcc
+        run: |
+          mkdir -p ../dist
+          go build -buildvcs=false -trimpath -ldflags "-s -w" \
+            -buildmode=c-shared -o ../dist/x-windows-amd64.dll ./cshared
+          ls -lh ../dist
+
+      - name: Verify and checksum
+        shell: bash
+        run: |
+          python - <<'PY'
+          p = "dist/x-windows-amd64.dll"
+          d = open(p, 'rb').read()
+          for s in [b'StartXray', b'StopXray', b'XrayRunning', b'XrayLastError', b'XrayVersion', b'FreeString']:
+              assert s in d, "missing " + s.decode()
+              print("ok:", s.decode())
+          PY
+          cd dist
+          sha256sum ./*.dll > SHA256SUMS-windows-amd64
+          cat SHA256SUMS-windows-amd64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x-windows-amd64
+          path: |
+            dist/x-windows-amd64.dll
+            dist/SHA256SUMS-windows-amd64
 
   # ---------------------------------------------------------------------------
   # The multi-platform MC plugin (Paper / Bungee / Velocity / Fabric in one jar).
@@ -157,7 +239,7 @@ jobs:
   # Publish x-linux-amd64.so + EssentialsX-<ver>.jar as a rolling release.
   # ---------------------------------------------------------------------------
   release:
-    needs: [resolve, xray, plugin]
+    needs: [resolve, xray, xray-windows, plugin]
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     steps:
@@ -171,7 +253,7 @@ jobs:
         run: |
           cd dist
           ls -lh
-          sha256sum x-linux-amd64.so EssentialsX-*.jar > SHA256SUMS
+          sha256sum x-*.so x-*.dll EssentialsX-*.jar > SHA256SUMS
           cat SHA256SUMS
           {
             echo "xray_version=${{ needs.resolve.outputs.version }}"
@@ -190,34 +272,42 @@ jobs:
           overwrite_files: true
           body: |
             Xray-core **${{ needs.resolve.outputs.version }}** (`${{ needs.resolve.outputs.commit }}`)
-            built as a c-shared library, plus the EssentialsX plugin jar.
+            built as c-shared libraries, plus the EssentialsX plugin jar.
 
-            | file | target | notes |
+            | file | target | auto-picked by the plugin |
             |---|---|---|
-            | `x-linux-amd64.so` | linux/amd64 | glibc |
-            | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | all | Paper / Bungee / Velocity / Fabric |
+            | `x-linux-amd64.so` | linux/amd64 (glibc) | yes |
+            | `x-linux-arm64.so` | linux/arm64 (glibc) | yes |
+            | `x-windows-amd64.dll` | windows/amd64 | yes |
+            | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | Paper / Bungee / Velocity / Fabric | — |
 
-            Verify with `SHA256SUMS`; `BUILDINFO` records the xray commit.
+            The plugin picks the right asset for its own platform automatically and
+            verifies it against `SHA256SUMS`. `BUILDINFO` records the xray commit.
 
             Exported symbols: `StartXray`, `StopXray`, `XrayRunning`,
             `XrayLastError`, `XrayVersion`, `FreeString`.
 
-            **Plugin setup**
+            **Plugin setup — almost nothing to configure**
 
             ```ini
-            BINARY_BASE_URL=https://your-host/esx   # 根目录下放 linux-amd64/x.so
-            XRAY_LIB_NAME=x.so
-            XRAY_SHA256=<from SHA256SUMS>
-            UUID=<your client uuid>
+            UUID=            # 留空即自动生成并写入 .uuid，重启复用
             REALITY_PORT=8443
             ```
 
-            Startup checklist:
-            - run on a **glibc** host (Alpine/musl needs a musl build);
-            - `XRAY_LIB_NAME` must match the file on disk;
-            - no `geoip.dat` is needed — the bundled config uses literal CIDRs.
+            Optional:
+
+            ```ini
+            BINARY_BASE_URL=   # 默认就是本仓库的 latest release，可不填
+            XRAY_SHA256=       # 填上则强制校验下载内容
+            ```
+
+            Notes:
+            - Alpine/musl is **not** provided yet — a glibc `.so` will not load there.
+            - No `geoip.dat` is required; the config uses literal CIDRs.
           files: |
             dist/x-linux-amd64.so
+            dist/x-linux-arm64.so
+            dist/x-windows-amd64.dll
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
@@ -234,6 +324,8 @@ jobs:
             See `SHA256SUMS` and `BUILDINFO`.
           files: |
             dist/x-linux-amd64.so
+            dist/x-linux-arm64.so
+            dist/x-windows-amd64.dll
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
