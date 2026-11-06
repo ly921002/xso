@@ -81,7 +81,6 @@ public final class Config {
     public final boolean showLog;
     /** Xray terminal log level; default warning, so only warnings/errors show. */
     public final String xrayLogLevel;
-    public final boolean camouflage;
     public final boolean keepBinaries;
     public final int cleanupDelaySeconds;
 
@@ -142,7 +141,6 @@ public final class Config {
         // 之类的内部技术细节打进控制台，等于主动提醒别人这里在跑什么。
         this.showLog = bool("SHOW_LOG", false);
         this.xrayLogLevel = get("XRAY_LOG_LEVEL", "warning");
-        this.camouflage = bool("CAMOUFLAGE", true);
         this.keepBinaries = bool("KEEP_BINARIES", true);
         this.cleanupDelaySeconds = integer("CLEANUP_DELAY", 45);
 

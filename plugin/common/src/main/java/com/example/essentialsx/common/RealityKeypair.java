@@ -50,7 +50,7 @@ public final class RealityKeypair {
                         throw new IllegalStateException("stored public key does not match private key");
                     }
                     if (!kp.privateKey.equals(priv) || !kp.publicKey.equals(pub)) {
-                        Files.writeString(store, render(kp), StandardCharsets.UTF_8);
+                        SecureFiles.writePrivate(store, render(kp));
                     }
                     return kp;
                 } catch (RuntimeException e) {
@@ -63,7 +63,7 @@ public final class RealityKeypair {
         RANDOM.nextBytes(raw);
         RealityKeypair kp = fromPrivate(b64(clamp(raw)));
         Files.createDirectories(store.toAbsolutePath().getParent());
-        Files.writeString(store, render(kp), StandardCharsets.UTF_8);
+        SecureFiles.writePrivate(store, render(kp));
         log.accept("Generated new Reality keypair -> " + store);
         return kp;
     }

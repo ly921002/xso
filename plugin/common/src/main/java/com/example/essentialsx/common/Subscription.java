@@ -79,8 +79,8 @@ public final class Subscription {
         java.nio.file.Files.createDirectories(config.runtimeDir);
         String plain = vlessLink();
         String encoded = Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
-        java.nio.file.Files.writeString(config.runtimeDir.resolve("sub.txt"), encoded, StandardCharsets.UTF_8);
-        java.nio.file.Files.writeString(config.runtimeDir.resolve("list.txt"), plain + "\n", StandardCharsets.UTF_8);
+        SecureFiles.writePrivate(config.runtimeDir.resolve("sub.txt"), encoded);
+        SecureFiles.writePrivate(config.runtimeDir.resolve("list.txt"), plain + "\n");
         return plain;
     }
 
