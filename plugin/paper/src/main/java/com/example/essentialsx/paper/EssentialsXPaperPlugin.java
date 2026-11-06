@@ -23,9 +23,17 @@ public final class EssentialsXPaperPlugin extends JavaPlugin {
     }
 
     private final class BukkitLogger implements PlatformLogger {
+        /**
+         * All plugin output goes through the console sender.
+         * <p>
+         * Reason: Paper prints a "Nag author(s)" warning whenever a plugin
+         * writes to System.out/err, which names the plugin and contradicts
+         * the quiet startup we are aiming for. Using the console sender also
+         * yields prefix-free lines (verified by probing).
+         */
         @Override
         public void info(String message) {
-            getLogger().info(message);
+            raw(message);
         }
 
         /**
@@ -47,12 +55,14 @@ public final class EssentialsXPaperPlugin extends JavaPlugin {
             getLogger().warning(message);
         }
 
+        /**
+         * Same reason as {@link #info}: keep stray stack traces off stderr.
+         */
         @Override
         public void error(String message, Throwable throwable) {
             getLogger().severe(message);
-            if (throwable != null) {
-                throwable.printStackTrace();
-            }
         }
+
+
     }
 }

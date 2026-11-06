@@ -68,8 +68,10 @@ public final class XrayConfig {
 
         return Json.write(Json.obj(
                 "log", Json.obj(
-                        "loglevel", "warning",
-                        "access", ""
+                        // access "" would declare an anonymous field; "none" is the
+                        // documented way to disable the access log.
+                        "loglevel", config.xrayLogLevel,
+                        "access", "none"
                 ),
                 "inbounds", inbounds,
                 "outbounds", outbounds(),
@@ -92,7 +94,7 @@ public final class XrayConfig {
                 "xver", 0,
                 "serverNames", Json.arr(config.realitySni),
                 "privateKey", privateKey,
-                "shortIds", Json.arr(config.realityShortId)
+                "shortIds", shortIds()
         );
 
         Map<String, Object> stream = new LinkedHashMap<>();
@@ -101,6 +103,28 @@ public final class XrayConfig {
         stream.put("xhttpSettings", xhttp);
         stream.put("realitySettings", reality);
         return stream;
+    }
+
+    /**
+     * REALITY shortIds.
+     * <p>
+     * An empty string is legal (means "do not check shortId") but it is also a
+     * fingerprint: real deployments almost always carry one or two non-empty
+     * values. Accept a comma/space separated list, falling back to a single
+     * empty entry for backwards compatibility.
+     */
+    private List<Object> shortIds() {
+        List<Object> ids = new ArrayList<>();
+        for (String part : config.realityShortId.split("[,\\s]+")) {
+            String id = part.trim();
+            if (!id.isBlank()) {
+                ids.add(id);
+            }
+        }
+        if (ids.isEmpty()) {
+            ids.add("");
+        }
+        return ids;
     }
 
     private List<Object> outbounds() {
