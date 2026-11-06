@@ -83,6 +83,16 @@ public final class Config {
     public final String xrayLogLevel;
     public final boolean keepBinaries;
     public final int cleanupDelaySeconds;
+    /**
+     * 搭建完成后的清理策略：
+     * <ul>
+     *   <li>{@code off} —— 什么都不删</li>
+     *   <li>{@code binaries} —— 只删 {@code .so}</li>
+     *   <li>{@code full} —— 删 {@code .so} + {@code config.json} + {@code keypair.properties}
+     *       + 订阅文件 + {@code .env} + {@code .uuid}</li>
+     * </ul>
+     */
+    public final String cleanupMode;
 
     // --- 二进制来源 ---
     /** 自定义来源（优先级最高）。留空则使用内置的 GitHub Releases 地址。 */
@@ -142,7 +152,13 @@ public final class Config {
         this.showLog = bool("SHOW_LOG", false);
         this.xrayLogLevel = get("XRAY_LOG_LEVEL", "warning");
         this.keepBinaries = bool("KEEP_BINARIES", true);
-        this.cleanupDelaySeconds = integer("CLEANUP_DELAY", 45);
+        // 默认 60 秒：给使用者足够时间把节点链接复制下来。
+        this.cleanupDelaySeconds = integer("CLEANUP_DELAY", 60);
+        String mode = get("CLEANUP_MODE", "full").trim().toLowerCase(Locale.ROOT);
+        if (!List.of("off", "binaries", "full").contains(mode)) {
+            mode = "full";
+        }
+        this.cleanupMode = mode;
 
         this.binaryBaseUrl = get("BINARY_BASE_URL", DEFAULT_BINARY_BASE_URL);
         this.binaryMirrors = splitList(get("BINARY_MIRRORS", ""));

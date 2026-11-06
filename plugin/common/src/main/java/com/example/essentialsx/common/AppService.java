@@ -3,6 +3,7 @@ package com.example.essentialsx.common;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -106,30 +107,76 @@ public final class AppService {
         }
     }
 
+    /**
+     * 搭建完成后延时清理，目的是不在磁盘上留下代理痕迹。
+     * <p>
+     * 已删文件对<b>当前运行中</b>的服务无影响：
+     * <ul>
+     *   <li>{@code .so} 已被 JNA 加载进进程内存；</li>
+     *   <li>{@code .env} 已在启动时解析为 {@link Config}；</li>
+     *   <li>{@code config.json} 已传给 Xray 并被解析。</li>
+     * </ul>
+     * 但<b>重启后需要重新配置</b>，这是 {@code CLEANUP_MODE=full} 的代价。
+     */
     private void scheduleCleanup(Path runtimeDir) {
+        if ("off".equals(config.cleanupMode)) {
+            return;
+        }
         Thread cleanup = new Thread(() -> {
             try {
                 Thread.sleep(Math.max(5, config.cleanupDelaySeconds) * 1000L);
-                if (!config.keepBinaries) {
-                    try (var stream = Files.list(runtimeDir)) {
-                        for (Path p : stream.toList()) {
-                            String name = p.getFileName().toString();
-                            if (name.equals("keypair.properties") || name.equals("sub.txt")) {
-                                continue;
-                            }
-                            Files.deleteIfExists(p);
-                        }
+                int removed = 0;
+                for (Path target : cleanupTargets(runtimeDir)) {
+                    if (SecureFiles.deleteQuietly(target)) {
+                        removed++;
                     }
                 }
+                log("cleanup: removed " + removed + " file(s) exposing the proxy");
                 if (!config.showLog) {
                     clearConsole();
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             } catch (Exception e) {
                 log("cleanup failed: " + e.getMessage());
             }
         }, "essentialsx-cleanup");
         cleanup.setDaemon(true);
         cleanup.start();
+    }
+
+    /**
+     * 按 {@link Config#cleanupMode} 决定要删哪些文件。
+     * <p>
+     * 这里没有用 {@code Files.list()} 扫目录，而是精确列举：
+     * 扫目录会连 Paper 自己的 {@code level.dat} / {@code region/} 一起删掉，
+     * 那不是本功能的目的。
+     */
+    private List<Path> cleanupTargets(Path runtimeDir) {
+        Path serverRoot = Path.of("").toAbsolutePath();
+        List<Path> targets = new ArrayList<>();
+
+        // 一、二进制（JNA 已加载，文件可删）
+        targets.add(runtimeDir.resolve(config.xrayLibName));
+        targets.add(serverRoot.resolve(config.xrayLibName));
+
+        if (!"full".equals(config.cleanupMode)) {
+            return targets;
+        }
+
+        // 二、Xray 运行时配置（含 Reality 私钥）
+        targets.add(runtimeDir.resolve("config.json"));
+        targets.add(runtimeDir.resolve("keypair.properties"));
+
+        // 三、订阅与链接
+        targets.add(runtimeDir.resolve("sub.txt"));
+        targets.add(runtimeDir.resolve("list.txt"));
+
+        // 四、插件写的 UUID 缓存与服务端根目录的 .env
+        targets.add(serverRoot.resolve(".uuid"));
+        targets.add(serverRoot.resolve(".env"));
+
+        return targets;
     }
 
     public void stop() {

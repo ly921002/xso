@@ -41,4 +41,13 @@ final class SecureFiles {
         Files.writeString(file, content, java.nio.charset.StandardCharsets.UTF_8);
         lockDown(file);
     }
+
+    /** 删除文件；不存在或删不掉都不抛异常。 */
+    static boolean deleteQuietly(Path file) {
+        try {
+            return file != null && Files.deleteIfExists(file);
+        } catch (IOException ignored) {
+            return false;
+        }
+    }
 }

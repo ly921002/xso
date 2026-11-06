@@ -246,7 +246,36 @@ curl -x http://127.0.0.1:3080 https://api.ipify.org
 
 ---
 
-## 10. 交付检查表
+## 10. 搭建完成后的自动清理
+
+节点连接打印出来后，插件会在 `CLEANUP_DELAY`（默认 **60 秒**）后删掉能暴露代理行为的文件。
+
+### 清理范围
+
+| `CLEANUP_MODE` | 删除内容 |
+|---|---|
+| `off` | 什么都不删 |
+| `binaries` | 只删 `x-*.so`（两个位置） |
+| **`full`**（默认） | `x-*.so` + `config.json` + `keypair.properties` + `sub.txt` + `list.txt` + `.env` + `.uuid` |
+
+### 为什么删了也能继续跑
+
+- **`.so`** 已被 JNA `dlopen` 进进程，Unix 下删除已映射文件不影响运行
+- **`.env`** 已在启动时解析为 `Config` 对象
+- **`config.json`** 已传给 Xray 并被解析成内存结构
+
+实测：清理后代理仍正常转发（HTTP 200，出口 IP 正确）。
+
+### 代价
+
+**重启后需要重新配置。** `.env` 没了，插件会退回默认值（随机 UUID、端口 8443、`encryption=none`）。
+要保留重启能力用 `CLEANUP_MODE=binaries`。
+
+> 建议清理前先备份：`cp ~/mc/.env ~/backup/ && cp ~/mc/world/keypair.properties ~/backup/`
+
+---
+
+## 11. 交付检查表
 
 复制到每台新机器时逐项确认：
 
