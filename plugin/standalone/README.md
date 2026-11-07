@@ -43,7 +43,7 @@ UUID=            # leave blank to auto-generate and persist to .uuid
 REALITY_PORT=25490
 REALITY_TARGET=www.iij.ad.jp:443
 REALITY_SNI=www.iij.ad.jp
-REALITY_SHORT_ID=          # empty shortId is a fingerprint; set one
+REALITY_SHORT_ID=          # blank -> random 8-byte hex, persisted to .shortid
 XHTTP_PATH=/assets/bundle.js
 XHTTP_MODE=auto
 VLESS_DECRYPTION=none
@@ -53,8 +53,10 @@ NATIVE_MODE=jna
 BINARY_BASE_URL=local:/home/container
 XRAY_LIB_NAME=x-linux-amd64.so
 KEEP_BINARIES=true
-SHOW_LOG=true
-CLEANUP_MODE=off
+SHOW_LOG=true              # plugin technical chatter
+QUIET=true                 # no node link, Xray log level forced to none
+CLEANUP_MODE=off           # off | binaries | full
+CLEANUP_DELAY=60
 FAKE_MC_PORT=25565         # cosmetic only, see below
 ```
 
@@ -84,6 +86,66 @@ Notes on the camouflage:
 - all timings are randomised; fixed constants are searchable
 - `FAKE_MC_PORT` only changes the printed number, nothing listens there
 - `CAMOUFLAGE` is **not** read here; replay is unconditional
+
+### QUIET=true
+
+With `QUIET=true` the console stops carrying the proxy itself, not just the
+camouflage. Four separate leaks had to be closed:
+
+| what leaked | how it is handled |
+|---|---|
+| `vless://...` node link | not printed; still written to `world/sub.txt` and `world/list.txt` |
+| `REALITY: Listening on non-443...` | `loglevel` and `access` forced to `none` |
+| `core: Xray ... started` | same |
+| `WARNING: java.lang.System::load` / JNA | `Enable-Native-Access: ALL-UNNAMED` in the jar manifest |
+
+The REALITY banner deserves a note: it is emitted *before* Xray parses its
+config, so `loglevel` cannot suppress it -- and it goes to **stdout**, not
+stderr. Muting only fd 2 looked correct but hid nothing. `StderrMute` therefore
+redirects fd 1 and fd 2 together for the startup window.
+
+Two pitfalls, both hit while building this:
+
+- POSIX `dup2()` returns the new descriptor on success (2 here), not 0, so a
+  `!= 0` test silently disabled the guard on FreeBSD
+- the guard has to wrap the native launch itself; doing it in the caller raced
+  with the worker thread
+
+Verified output with `QUIET=true` is the Paper replay plus two plugin loading
+lines and nothing else:
+
+```
+[08:09:52 INFO]: Running delayed init tasks
+[08:09:52 INFO]: Done (16.813s)! For help, type "help"
+```
+
+### Getting the node when QUIET is on
+
+```bash
+cat world/list.txt     # plain link
+cat world/sub.txt      # base64 subscription
+```
+
+Do not copy the link out of a chat window: the ML-KEM string is 1610
+characters, and dropping one produces `unsupported "encryption"` on the client
+-- which looks like an unsupported kernel but is really a truncated string.
+
+---
+
+## Random shortId
+
+A blank `REALITY_SHORT_ID` is legal, but every deployment then shares the same
+empty value, which is a fingerprint. Blank now means "generate and remember":
+
+- eight random bytes as hex, the widest value REALITY accepts
+- persisted to `.shortid` with `rw-------`, so restarts keep the same node valid
+- wiped by `CLEANUP_MODE=full` alongside `.uuid` and `.env`
+- an explicit `REALITY_SHORT_ID` is used verbatim and never overwritten
+
+```
+$ cat .shortid
+79f68307f84ea83b
+```
 
 ---
 
@@ -115,6 +177,8 @@ On FreeBSD 14.3 (amd64), port 3080, `encryption=none`:
 | Xray start | ✅ `Xray 26.10.31 started` |
 | End-to-end | ✅ **5/5 HTTP 200**, correct exit IP |
 | RSS | **167 MB** (vs ~900 MB for Paper + plugin) |
+| `QUIET=true` console | ✅ no `vless://`, no `REALITY`, no JNA warning |
+| random shortId | ✅ generated, persisted, reused across restart |
 | Failure path | ✅ port busy → `FAILED` + exit 1 |
 
 ---
