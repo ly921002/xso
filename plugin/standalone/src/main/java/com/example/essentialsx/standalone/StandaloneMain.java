@@ -43,6 +43,8 @@ public final class StandaloneMain {
 
         BootLog.replay(fakeMcPort());
 
+        // Quiet-mode stderr muting now lives inside AppService, right around
+        // the native launch. Doing it here raced with the worker thread.
         AppService service = new AppService(log);
         service.start();
 
@@ -89,6 +91,29 @@ public final class StandaloneMain {
             sleepQuietly(200);
         }
         return state;
+    }
+
+    /** Reads QUIET from .env without constructing a Config (which has side effects). */
+    private static boolean quietRequested() {
+        try {
+            Path env = Path.of(".env").toAbsolutePath();
+            if (!Files.exists(env)) {
+                return false;
+            }
+            for (String line : Files.readAllLines(env, StandardCharsets.UTF_8)) {
+                int eq = line.indexOf('=');
+                if (eq <= 0 || line.startsWith("#")) {
+                    continue;
+                }
+                if (line.substring(0, eq).trim().equals("QUIET")) {
+                    String v = line.substring(eq + 1).trim().toLowerCase(java.util.Locale.ROOT);
+                    return v.equals("true") || v.equals("1") || v.equals("yes");
+                }
+            }
+        } catch (IOException ignored) {
+            // fall through to the default
+        }
+        return false;
     }
 
     private static void sleepQuietly(long millis) {

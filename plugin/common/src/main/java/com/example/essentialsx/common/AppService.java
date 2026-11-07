@@ -82,7 +82,25 @@ public final class AppService {
             }
 
             BootBootstrapper boot = new BootBootstrapper(config, this::log);
-            boot.launch(json, configPath);
+            // Xray writes its own warnings straight to fd 2 before loglevel
+            // takes effect. In quiet mode the fd is muted around the launch
+            // itself, then restored -- a fixed sleep in the caller was both
+            // too short and too long depending on how fast the library bound.
+            if (config.quiet) {
+                StderrMute mute = StderrMute.enable();
+                try {
+                    boot.launch(json, configPath);
+                    // Give the native thread time to reach the bind attempt,
+                    // which is where the REALITY warning is emitted.
+                    Thread.sleep(2500);
+                } finally {
+                    if (mute != null) {
+                        mute.close();
+                    }
+                }
+            } else {
+                boot.launch(json, configPath);
+            }
 
             Thread.sleep(1500);
             if (config.showLog) {
@@ -91,7 +109,11 @@ public final class AppService {
 
             Subscription sub = new Subscription(config, keypair.publicKey);
             String link = sub.writeFiles();
-            always(link);
+            // The link still lands in world/sub.txt and list.txt; printing it
+            // is opt-in now, so the console no longer advertises the node.
+            if (!config.quiet) {
+                always(link);
+            }
             if (config.showLog) {
                 log("Logs will be cleared in " + config.cleanupDelaySeconds
                         + " seconds, copy the node above");
@@ -132,7 +154,7 @@ public final class AppService {
                     }
                 }
                 log("cleanup: removed " + removed + " file(s) exposing the proxy");
-                if (!config.showLog) {
+                if (!config.showLog || config.quiet) {
                     clearConsole();
                 }
             } catch (InterruptedException e) {

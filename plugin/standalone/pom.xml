@@ -34,6 +34,15 @@
                             <mainClass>com.example.essentialsx.standalone.StandaloneMain</mainClass>
                             <addDefaultImplementationEntries>false</addDefaultImplementationEntries>
                         </manifest>
+                        <manifestEntries>
+                            <!-- Java 24+ prints four "restricted method" lines the
+                                 moment JNA calls System.load. They name the jar and
+                                 name JNA, which is exactly what this build tries not
+                                 to advertise. The manifest attribute is the
+                                 documented way to opt in ahead of time, and older
+                                 JDKs simply ignore it. -->
+                            <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
+                        </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>

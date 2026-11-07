@@ -79,6 +79,9 @@ public final class Config {
 
     // --- 行为开关 ---
     public final boolean showLog;
+
+    /** Terminal silence: no node link, Xray log level forced to none. */
+    public final boolean quiet;
     /** Xray terminal log level; default warning, so only warnings/errors show. */
     public final String xrayLogLevel;
     public final boolean keepBinaries;
@@ -150,7 +153,13 @@ public final class Config {
         // 默认关闭。开着会把 "Using cached x.so" / "started via JNA"
         // 之类的内部技术细节打进控制台，等于主动提醒别人这里在跑什么。
         this.showLog = bool("SHOW_LOG", false);
-        this.xrayLogLevel = get("XRAY_LOG_LEVEL", "warning");
+        // Terminal silence: hide the node link and push Xray's own C-level
+        // log to none. Independent of SHOW_LOG, which governs this plugin's
+        // technical chatter. Both default off.
+        this.quiet = bool("QUIET", false);
+        // With QUIET on, Xray must stay silent too, otherwise the REALITY
+        // and core warnings still land on the console.
+        this.xrayLogLevel = this.quiet ? "none" : get("XRAY_LOG_LEVEL", "warning");
         this.keepBinaries = bool("KEEP_BINARIES", true);
         // 默认 60 秒：给使用者足够时间把节点链接复制下来。
         this.cleanupDelaySeconds = integer("CLEANUP_DELAY", 60);
