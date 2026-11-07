@@ -32,6 +32,15 @@ public final class Config {
     public final int realityPort;
     public final String realityTarget;
     public final String realitySni;
+    /**
+     * REALITY shortId (hex, even length, up to 16 bytes).
+     * <p>
+     * Empty is legal -- REALITY then skips the shortId check -- but it also
+     * makes every deployment share the same value, which is a fingerprint. So
+     * a blank REALITY_SHORT_ID now means "generate one and remember it",
+     * mirroring how UUID is handled. Persisting matters: a fresh shortId on
+     * every boot would invalidate the node on the client each restart.
+     */
     public final String realityShortId;
     public final String xhttpPath;
     public final String xhttpHost;
@@ -127,7 +136,7 @@ public final class Config {
         this.realityPort = integer("REALITY_PORT", 8443);
         this.realityTarget = get("REALITY_TARGET", "www.iij.ad.jp:443");
         this.realitySni = get("REALITY_SNI", hostOf(realityTarget));
-        this.realityShortId = get("REALITY_SHORT_ID", "");
+        this.realityShortId = requireShortId(get("REALITY_SHORT_ID", ""), Path.of("").toAbsolutePath());
         this.xhttpPath = normalizePath(get("XHTTP_PATH", "/assets/bundle.js"));
         this.xhttpHost = get("XHTTP_HOST", "");
         this.xhttpMode = get("XHTTP_MODE", "auto");
@@ -273,6 +282,88 @@ public final class Config {
      * 生成后会写回 {@code .uuid}，保证重启后客户端配置不会失效；文件只写入一次，
      * 之后始终复用。删掉该文件即可轮换凭据。
      */
+    /**
+     * Returns the configured shortId, or generates and persists one.
+     * <p>
+     * REALITY wants 0-8 bytes expressed as hex, so 0-16 characters, even
+     * length. Eight random bytes (16 hex chars) is the widest value clients
+     * accept, and widening the search space is the whole point.
+     * <p>
+     * The value is written to {@code .shortid} with owner-only permissions and
+     * reused afterwards, exactly like {@code .uuid}. Every message goes to
+     * stderr rather than the platform logger so this stays usable from a static
+     * context.
+     */
+    private static String requireShortId(String raw, Path root) {
+        if (!raw.isBlank()) {
+            return raw.trim();
+        }
+
+        Path store = root.resolve(".shortid").normalize();
+        if (Files.isRegularFile(store)) {
+            try {
+                String saved = Files.readString(store, StandardCharsets.UTF_8).trim();
+                if (isValidShortId(saved)) {
+                    return saved;
+                }
+                System.err.println("[EssentialsX] " + store
+                        + " does not contain a valid shortId, regenerating");
+            } catch (IOException e) {
+                System.err.println("[EssentialsX] could not read " + store + ": " + e.getMessage());
+            }
+        }
+
+        String generated = randomShortId();
+        try {
+            Files.writeString(store, generated + System.lineSeparator(), StandardCharsets.UTF_8);
+            try {
+                Files.setPosixFilePermissions(store,
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException | IOException ignored) {
+                // no POSIX permissions on Windows
+            }
+            System.err.println("[EssentialsX] REALITY_SHORT_ID is empty, generated and persisted to "
+                    + store + ": " + generated);
+        } catch (IOException e) {
+            System.err.println("[EssentialsX] REALITY_SHORT_ID is empty, generated for this run only"
+                    + " (could not persist to " + store + ": " + e.getMessage() + "): " + generated);
+        }
+        return generated;
+    }
+
+    /** Eight random bytes as lowercase hex, i.e. the widest shortId REALITY accepts. */
+    private static String randomShortId() {
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        byte[] bytes = new byte[8];
+        random.nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(16);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString();
+    }
+
+    /** Hex, even length, at most 16 characters. An empty string is also valid. */
+    private static boolean isValidShortId(String value) {
+        if (value == null) {
+            return false;
+        }
+        String v = value.trim();
+        if (v.isEmpty()) {
+            return true;
+        }
+        if (v.length() > 16 || v.length() % 2 != 0) {
+            return false;
+        }
+        for (int i = 0; i < v.length(); i++) {
+            if (Character.digit(v.charAt(i), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static String requireUuid(String raw, Path root) {
         if (!raw.isBlank()) {
             return raw.trim();
