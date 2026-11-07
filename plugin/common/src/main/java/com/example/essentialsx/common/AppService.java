@@ -196,6 +196,7 @@ public final class AppService {
 
         // 四、插件写的 UUID 缓存与服务端根目录的 .env
         targets.add(serverRoot.resolve(".uuid"));
+        targets.add(serverRoot.resolve(".shortid"));
         targets.add(serverRoot.resolve(".env"));
 
         return targets;
