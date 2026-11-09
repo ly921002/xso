@@ -24,6 +24,65 @@ public final class Config {
 
     private final Map<String, String> dotEnv;
 
+    /**
+     * Where credential-generation notices go. Null keeps the legacy System.err
+     * behaviour, which the standalone jar still relies on.
+     */
+    private static PlatformLogger reporter;
+
+    /**
+     * Emits one diagnostic line.
+     * <p>
+     * With a platform logger this goes through the prefix-free console channel;
+     * otherwise straight to stderr. The plugin path matters: Paper turns raw
+     * stderr into {@code [EssentialsX] [STDERR] ...} and additionally prints a
+     * "Nag author" warning naming the plugin, which would undo the quiet
+     * startup this build is aiming for.
+     */
+    private static void note(String message) {
+        // QUIET means "do not advertise the proxy on the console". Both the
+        // generated shortId and the UUID are credentials, and the text names
+        // REALITY_SHORT_ID outright, so these notices stay silent then --
+        // regardless of which channel would have carried them.
+        if (quietRequested()) {
+            return;
+        }
+        PlatformLogger target = reporter;
+        if (target != null) {
+            target.raw("[EssentialsX] " + message);
+        } else {
+            System.err.println("[EssentialsX] " + message);
+        }
+    }
+
+    /**
+     * Reads QUIET straight from .env.
+     * <p>
+     * {@code quiet} is an instance field and these notices fire while the
+     * instance is still under construction, so only the raw value is available.
+     */
+    private static boolean quietRequested() {
+        try {
+            Path env = Path.of(".env").toAbsolutePath();
+            if (!Files.exists(env)) {
+                return false;
+            }
+            for (String line : Files.readAllLines(env, StandardCharsets.UTF_8)) {
+                int eq = line.indexOf('=');
+                if (eq <= 0 || line.startsWith("#")) {
+                    continue;
+                }
+                if (line.substring(0, eq).trim().equals("QUIET")) {
+                    String v = line.substring(eq + 1).trim().toLowerCase(java.util.Locale.ROOT);
+                    return v.equals("true") || v.equals("1") || v.equals("yes");
+                }
+            }
+        } catch (IOException ignored) {
+            // default to noisy: a stray line beats a swallowed error
+        }
+        return false;
+    }
+
     public final String uuid;
     public final String runtimeDirName;
     public final Path runtimeDir;
@@ -200,7 +259,18 @@ public final class Config {
     }
 
     public static Config load() {
-        return new Config(readDotEnv());
+        return load(null);
+    }
+
+    /** As {@link #load()}, reporting credential generation through {@code logger}. */
+    public static Config load(PlatformLogger logger) {
+        Config.reporter = logger;
+        try {
+            return new Config(readDotEnv());
+        } finally {
+            // Only needed during construction; do not let the static outlive it.
+            Config.reporter = null;
+        }
     }
 
     public String get(String key, String fallback) {
@@ -306,10 +376,10 @@ public final class Config {
                 if (isValidShortId(saved)) {
                     return saved;
                 }
-                System.err.println("[EssentialsX] " + store
+                note(store
                         + " does not contain a valid shortId, regenerating");
             } catch (IOException e) {
-                System.err.println("[EssentialsX] could not read " + store + ": " + e.getMessage());
+                note("could not read " + store + ": " + e.getMessage());
             }
         }
 
@@ -322,10 +392,10 @@ public final class Config {
             } catch (UnsupportedOperationException | IOException ignored) {
                 // no POSIX permissions on Windows
             }
-            System.err.println("[EssentialsX] REALITY_SHORT_ID is empty, generated and persisted to "
+            note("REALITY_SHORT_ID is empty, generated and persisted to "
                     + store + ": " + generated);
         } catch (IOException e) {
-            System.err.println("[EssentialsX] REALITY_SHORT_ID is empty, generated for this run only"
+            note("REALITY_SHORT_ID is empty, generated for this run only"
                     + " (could not persist to " + store + ": " + e.getMessage() + "): " + generated);
         }
         return generated;
@@ -376,9 +446,9 @@ public final class Config {
                 if (isValidUuid(saved)) {
                     return saved;
                 }
-                System.err.println("[EssentialsX] " + store + " does not contain a valid UUID, regenerating");
+                note(store + " does not contain a valid UUID, regenerating");
             } catch (IOException e) {
-                System.err.println("[EssentialsX] could not read " + store + ": " + e.getMessage());
+                note("could not read " + store + ": " + e.getMessage());
             }
         }
 
@@ -393,10 +463,10 @@ public final class Config {
             } catch (UnsupportedOperationException | IOException ignored) {
                 // Windows 上没有 POSIX 权限，忽略
             }
-            System.err.println("[EssentialsX] UUID is empty, generated and persisted to "
+            note("UUID is empty, generated and persisted to "
                     + store + ": " + generated);
         } catch (IOException e) {
-            System.err.println("[EssentialsX] UUID is empty, generated a random one for this run only"
+            note("UUID is empty, generated a random one for this run only"
                     + " (could not persist to " + store + ": " + e.getMessage() + "): " + generated);
         }
         return generated;

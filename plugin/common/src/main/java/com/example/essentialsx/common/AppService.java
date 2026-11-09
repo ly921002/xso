@@ -53,7 +53,7 @@ public final class AppService {
         if (!running.compareAndSet(false, true)) {
             return;
         }
-        config = Config.load();
+        config = Config.load(logger);
         Path runtimeDir = config.runtimeDir;
 
         try {
