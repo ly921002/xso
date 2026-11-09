@@ -25,17 +25,29 @@ ARG PAPER_BUILD=132
 RUN set -eux; \
     if command -v apt-get >/dev/null 2>&1; then \
         apt-get update; \
-        apt-get install -y --no-install-recommends curl ca-certificates; \
+        apt-get install -y --no-install-recommends curl ca-certificates jq; \
         rm -rf /var/lib/apt/lists/*; \
     fi
 
 WORKDIR /server
 
+# api.papermc.io/v2 is sunset (HTTP 410). The replacement, fill.papermc.io/v3,
+# returns JSON instead of a file, so the build asks for the build metadata and
+# follows the url it reports. jq keeps that readable.
 RUN set -eux; \
-    curl -fsSL --retry 3 --retry-delay 2 \
-        -o /server/paper.jar \
-        "https://api.papermc.io/v2/projects/paper/versions/${PAPER_VERSION}/builds/${PAPER_BUILD}/downloads/paper-${PAPER_VERSION}-${PAPER_BUILD}.jar"; \
-    test -s /server/paper.jar
+    url=$(curl -fsSL --retry 3 --retry-delay 2 \
+            "https://fill.papermc.io/v3/projects/paper/versions/${PAPER_VERSION}/builds" \
+          | jq -r --argjson id "${PAPER_BUILD}" \
+              '.[] | select(.id == $id) | .downloads["server:default"].url' \
+          | head -1); \
+    test -n "$url" || { echo "build ${PAPER_BUILD} not found for ${PAPER_VERSION}"; exit 1; }; \
+    curl -fsSL --retry 3 --retry-delay 2 -o /server/paper.jar "$url"; \
+    test -s /server/paper.jar; \
+    # fill-data paths are content-addressed: the SHA-256 sits in the URL itself.
+    sha=$(printf '%s' "$url" | sed -n 's|.*/objects/\([0-9a-f]\{64\}\)/.*|\1|p'); \
+    if [ -n "$sha" ]; then \
+        echo "$sha  /server/paper.jar" | sha256sum -c -; \
+    fi
 
 RUN set -eux; \
     groupadd --gid 10001 app 2>/dev/null || true; \
