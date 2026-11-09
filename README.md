@@ -33,6 +33,28 @@
 
 ---
 
+## Docker 一键部署
+
+不想手动配二进制和端口，直接用镜像：
+
+| 镜像 | 内容 | 适用 |
+|---|---|---|
+| `ghcr.io/ly921002/xso-standalone` | 只有代理，无 Minecraft | 只要翻墙（内存约 170 MB） |
+| `ghcr.io/ly921002/xso-plugin` | Paper + 插件，同一 JVM | 还要能玩 MC（内存约 900 MB） |
+
+```bash
+docker run -d --name xso -p 443:443 \
+  -e QUIET=true \
+  -e REALITY_TARGET=www.iij.ad.jp:443 \
+  -e REALITY_SNI=www.iij.ad.jp \
+  -v xso-data:/app \
+  ghcr.io/ly921002/xso-standalone:latest
+```
+
+细节见 [docs/docker.md](docs/docker.md)，包括端口冲突处理、持久化和排错。
+
+---
+
 ## 2. 准备二进制库（按平台）
 
 插件按 `os.name` 自动推断文件名：
@@ -352,6 +374,7 @@ cat ~/mc/world/sub.txt      # Base64 订阅
 
 | 文档 | 内容 |
 |---|---|
+| [docs/docker.md](docs/docker.md) | 容器镜像的构建、端口、持久化与排错 |
 | [docs/reference.md](docs/reference.md) | C 库接口、JNA 用法、自行构建、CI |
 | [docs/plugin.md](docs/plugin.md) | 插件全部环境变量 |
 | [docs/server-binaries.md](docs/server-binaries.md) | 二进制编译细节 |
