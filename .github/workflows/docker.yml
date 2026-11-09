@@ -56,23 +56,29 @@ jobs:
           git fetch --depth 1 origin ${{ steps.v.outputs.commit }}
           git checkout FETCH_HEAD
 
+      - name: Copy the c-shared entrypoint
+        run: |
+          mkdir -p xray-src/cshared
+          cp cshared/main.go cshared/main_nocgo.go xray-src/cshared/
+
       - name: Build x-linux-amd64.so
         working-directory: xray-src
         env:
           CGO_ENABLED: '1'
           GOOS: linux
           GOARCH: amd64
+          # Pin the lowest x86-64 baseline: without it the toolchain emits code
+          # for the build machine's CPU, which SIGILLs on older hosts.
           GOAMD64: v1
           CGO_CFLAGS: '-O2 -march=x86-64 -mtune=generic'
           CC: gcc
         run: |
           mkdir -p ../dist
-          cp ../cshared/main.go ../cshared/main_nocgo.go ../cshared/
           go build -buildvcs=false -trimpath \
             -tags "netgo,osusergo" \
             -ldflags "-s -w -linkmode=external" \
             -buildmode=c-shared -o ../dist/x-linux-amd64.so ./cshared
-          ls -lh ../dist
+          ls -lh ../dist/x-linux-amd64.so
 
       - uses: actions/upload-artifact@v4
         with:
