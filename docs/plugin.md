@@ -67,13 +67,31 @@ BOT_TOKEN=                  # Telegram Bot Token
 
 ```
 SHOW_LOG=false              # 默认关闭；true 才输出内部调试细节
-CAMOUFLAGE=true             # 是否输出伪造的 Paper 启动日志
+QUIET=true                  # 终端静默：不打印节点链接，Xray 日志压到 none
 KEEP_BINARIES=true          # 是否保留下载的二进制（避免每次重启重下）
 CLEANUP_MODE=full           # off / binaries / full（默认 full）
 CLEANUP_DELAY=60            # 多少秒后清理敏感文件
 ALLOW_INSECURE=false        # 链接是否带 allowInsecure=1（REALITY 下建议 false）
 FILE_PATH=world             # 运行目录（相对于服务端根目录）
 ```
+
+`SHOW_LOG` 与 `QUIET` 相互独立：前者管插件自己的技术日志
+（`Using cached` / `started via JNA`），后者管“会不会在控制台暴露在跑代理”。
+
+`QUIET=true` 一并处理四类泄漏：
+
+| 泄漏源 | 处理 |
+|---|---|
+| `vless://` 节点链接 | 不打印；仍写入 `world/sub.txt` 与 `world/list.txt` |
+| `REALITY: Listening on non-443...` | `loglevel` / `access` 强制 `none` |
+| `core: Xray ... started` | 同上 |
+| `System::load` / JNA 警告 | 插件形态无法消除（JVM 由 Paper 启动）；standalone jar 用 manifest 属性处理 |
+
+REALITY 那一行在 Xray 解析配置**之前**输出，且写的是 **stdout**，
+所以只重定向 fd 2 没用，必须在启动窗口内把 fd 1 和 fd 2 一起静音。
+
+清理后会删除 `.env`、`.uuid`、`.shortid`、`config.json`、
+`keypair.properties`、订阅文件和 `.so`。`CAMOUFLAGE` 这个开关已经移除。
 
 #### 可选 WARP 出站
 

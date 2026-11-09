@@ -12,7 +12,7 @@
 | `UUID` | ❌ 独立 | 每台一个，泄露影响面隔离 |
 | Reality 密钥对 | ❌ 独立 | 首启自动生成于 `world/keypair.properties` |
 | `REALITY_PORT` | ❌ 独立 | 各机器端口不同（受主机限制） |
-| `REALITY_SHORT_ID` | ❌ 独立 | 每台一个随机值 |
+| `REALITY_SHORT_ID` | ❌ 独立 | **留空即自动随机生成**并持久化到 `.shortid` |
 | `VLESS_DECRYPTION` | ⚠️ 可复用 | 见下方说明 |
 | `VLESS_ENCRYPTION` | ⚠️ 可复用 | 必须与上一项成对 |
 | `REALITY_TARGET` / `REALITY_SNI` | ✅ 可相同 | 伪装目标，各机器一样也正常 |
@@ -86,13 +86,14 @@ cp EssentialsX-1.21.11.jar plugins/
 
 ## 4. 生成该机器专属参数
 
-```bash
-# UUID
-UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c "import uuid;print(uuid.uuid4())")
-# 或直接用 xray： ./xray uuid
+**UUID 和 shortId 都不用手动生成。** 两者留空时插件会自动生成，并持久化到
+`.uuid` / `.shortid`（权限 600），重启复用同一个值——否则每次重启都会让客户端
+配置失效。要轮换凭据，删掉对应文件即可。
 
-# shortId（8 字节 hex）
-SHORT_ID=$(openssl rand -hex 8)
+```bash
+# 需要固定值时才手工生成：
+#   UUID     -> ./xray uuid
+#   shortId  -> openssl rand -hex 8   （8 字节 hex，16 字符）
 
 # 加密串（可选；推荐每台独立）
 ./xray vlessenc
@@ -116,7 +117,8 @@ SHORT_ID=$(openssl rand -hex 8)
 
 ```ini
 # ---- 必填 ----
-UUID=<第 4 步生成>
+# 留空 = 自动生成并持久化到 .uuid；显式填写则原样使用
+UUID=
 REALITY_PORT=<本机可用端口>
 
 # ---- 伪装目标（可全机器相同）----
@@ -126,7 +128,8 @@ XHTTP_PATH=/assets/bundle.js
 XHTTP_MODE=auto
 
 # ---- 本机专属 ----
-REALITY_SHORT_ID=<第 4 步生成>
+# 留空 = 自动随机生成并持久化到 .shortid；显式填写则原样使用
+REALITY_SHORT_ID=
 
 # ---- VLESS 加密（成对，第三方不可混用）----
 VLESS_DECRYPTION=mlkem768x25519plus.native.600s.<服务端串>
@@ -141,9 +144,10 @@ XRAY_SHA256=<sha256>
 KEEP_BINARIES=true
 
 # ---- 行为 ----
-SHOW_LOG=false
-CAMOUFLAGE=true
-CLEANUP_DELAY=120
+SHOW_LOG=false          # 插件自身的技术日志（Using cached / started via JNA）
+QUIET=true              # 终端静默：不打印节点链接，Xray 日志压到 none
+CLEANUP_MODE=off        # off | binaries | full
+CLEANUP_DELAY=60
 ```
 
 `BINARY_BASE_URL` 三种写法：
@@ -220,29 +224,65 @@ curl -x http://127.0.0.1:3080 https://api.ipify.org
 
 ---
 
-## 9. 伪装相关（可选）
+## 9. 终端输出控制
 
-| 配置 | 作用 |
+控制台默认会把“这台机器在跑代理”直接写出来。`QUIET=true` 一并处理以下四类：
+
+| 泄漏源 | 处理方式 |
 |---|---|
-| `CAMOUFLAGE=true` | 保留伪装层（当前为空实现，仅作扩展点） |
-| `SHOW_LOG=false` | **默认值**，屏蔽 `Using cached` / `started via JNA` 等内部日志 |
-| `XRAY_LOG_LEVEL=warning` | xray 终端日志级别 |
+| `vless://...` 节点链接 | 不再打印到控制台；仍写入 `world/sub.txt` 与 `world/list.txt` |
+| `REALITY: Listening on non-443...` | `loglevel`/`access` 强制为 `none` |
+| `core: Xray 26.10.31 started` | 同上 |
+| `WARNING: java.lang.System::load ... com.sun.jna.Native` | 仅 standalone jar 可消除（manifest 里 `Enable-Native-Access`）；插件形态下 JVM 由 Paper 启动，本插件无权设置 |
 
-伪装层已做过的处理：
+`SHOW_LOG` 与 `QUIET` 相互独立：前者管插件自己的技术日志，后者管“会不会暴露在跑代理”。两者默认都关。
 
-- 插件输出全部走 `Bukkit.getConsoleSender()`，**不带 `[插件名]` 前缀**
-- 不再伪造 `Preparing spawn area: N%` 进度条（会与 Paper 真实输出矛盾，产生两次 100%）
-- 节点链接无条件输出，不受 `SHOW_LOG` 影响
-- `REALITY_SHORT_ID` 建议非空，空 shortId 本身是特征
+### REALITY 横幅为什么要特殊处理
 
-**仍会暴露的两行**（Paper 自己打印，插件无法消除）：
+那一行在 Xray **解析配置之前**就输出了，`loglevel: none` 管不到；而且它写的是
+**stdout 而不是 stderr**——只重定向 fd 2 看起来正确，实际什么都没挡住。
+
+所以 `StderrMute` 在启动窗口内把 fd 1 和 fd 2 一起指向 `/dev/null`，之后恢复。
+两个坑都踩过：
+
+- POSIX `dup2()` 成功时返回**新描述符**（这里是 2）而不是 0，`!= 0` 判断会让守卫在
+  FreeBSD 上静默失效
+- 守卫必须包住**原生启动本身**；放在调用方会和 worker 线程竞速
+
+### 插件形态下的额外注意
+
+作为 Paper 插件运行时，任何 `System.out/err` 写入都会被 Paper 包装成
+`[EssentialsX] [STDERR] ...`，并额外打印一条 `Nag author(s)` 警告，
+等于主动点名插件。所以凭据生成提示（UUID / shortId）改走
+`PlatformLogger.raw()`，`QUIET=true` 时直接不输出。
+
+### 伪装层其余处理
+
+- 插件输出走 `Bukkit.getConsoleSender()`，不带 `[插件名]` 前缀
+- 不再伪造 `Preparing spawn area: N%`（会与 Paper 真实输出矛盾，出现两次 100%）
+- `REALITY_SHORT_ID` 留空会自动随机，避免所有部署共享空值这个特征
+
+### 仍会暴露的两行
 
 ```
 [PluginRemapper] Remapping plugin 'plugins/EssentialsX-1.21.11.jar'...
  - EssentialsX (1.21.11)
 ```
 
-这两行在任何装了 EssentialsX 的服务器上都一样，属于正常现象。
+任何装了 EssentialsX 的服务器都有这两行，属于正常现象。
+
+### 静默后如何取节点
+
+控制台不再打印链接，从文件取：
+
+```bash
+cat ~/mc/world/list.txt     # 明文链接
+cat ~/mc/world/sub.txt      # Base64 订阅
+```
+
+> 1610 字符的加密串**手工复制极易漏字符**，漏了客户端会报
+> `unsupported "encryption"`（看起来像内核不支持，其实是串被截断）。
+> 用 SFTP 下载文件，不要从聊天窗口复制。
 
 ---
 
@@ -256,7 +296,7 @@ curl -x http://127.0.0.1:3080 https://api.ipify.org
 |---|---|
 | `off` | 什么都不删 |
 | `binaries` | 只删 `x-*.so`（两个位置） |
-| **`full`**（默认） | `x-*.so` + `config.json` + `keypair.properties` + `sub.txt` + `list.txt` + `.env` + `.uuid` |
+| **`full`** | `x-*.so` + `config.json` + `keypair.properties` + `sub.txt` + `list.txt` + `.env` + `.uuid` + `.shortid` |
 
 ### 为什么删了也能继续跑
 
@@ -283,8 +323,8 @@ curl -x http://127.0.0.1:3080 https://api.ipify.org
 - 用远程 URL 时每次重启会重新下载
 - `CLEANUP_MODE=full` 连 `BINARY_BASE_URL` 本身都在 `.env` 里，所以重启后完全需要重新配置
 
-实测（FreeBSD）：full 模式 60 秒后 8 个文件全部消失，
-进程不变、24725 仍监听，新建 VLESS 会话 6/6 返回 HTTP 200。
+实测（FreeBSD）：full 模式 60 秒后 9 个文件（含 `.shortid`）全部消失，
+进程不变、端口仍监听，新建 VLESS 会话 6/6 返回 HTTP 200。
 
 ---
 
@@ -295,14 +335,15 @@ curl -x http://127.0.0.1:3080 https://api.ipify.org
 - [ ] 插件 jar 已放入 `plugins/`
 - [ ] 对应平台的 `x-*.so` 已就绪，`XRAY_LIB_NAME` 匹配
 - [ ] `BINARY_BASE_URL` 与 `XRAY_LIB_NAME` 指向同一处
-- [ ] `UUID` 是本机新生成的
+- [ ] `UUID` 已填，或确认 `.uuid` 已自动生成（不要跨机器复制）
 - [ ] `world/keypair.properties` **未被复制过来**（首启自动生成）
 - [ ] `REALITY_PORT` 已在本机真实放行
-- [ ] `REALITY_SHORT_ID` 非空
+- [ ] `REALITY_SHORT_ID` 已填，或确认 `.shortid` 已自动生成
 - [ ] `VLESS_DECRYPTION` / `VLESS_ENCRYPTION` 是同一次 `vlessenc` 的产物
 - [ ] `VLESS_FLOW` 与加密串同时存在（vision 需配合加密）
 - [ ] `xray -test` 返回 `Configuration OK`
-- [ ] 启动后 `vless://` 链接含 `flow=` 和 `sid=`
+- [ ] 启动后 `vless://` 链接含 `flow=` 和 `sid=`（`QUIET=true` 时从 `world/list.txt` 取）
+- [ ] `QUIET=true` 时控制台不出现 `vless://` 与 `REALITY` 字样
 - [ ] 端到端 `curl -x` 返回服务器出口 IP
 
 ---
