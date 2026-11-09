@@ -8,16 +8,22 @@ on:
 permissions:
   contents: write
   actions: write      # needed for `gh workflow run` to re-trigger the build
-  # GITHUB_TOKEN is a GitHub App: modifying any file under .github/workflows/
-  # requires this explicit scope. Without it the push is rejected with
-  # "refusing to allow a GitHub App to create or update workflow ...".
-  workflows: write
+  # NOTE: `workflows` is NOT a valid key under `permissions`. GitHub rejects
+  # the workflow file outright ("Unexpected value 'workflows'"). A repo-scoped
+  # PAT stored as secret BUMP_TOKEN is what actually permits pushing changes
+  # to .github/workflows/; see the checkout step's token: below.
 
 jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # GITHUB_TOKEN is a GitHub App and cannot push workflow-file changes
+          # ("refusing to allow a GitHub App to create or update workflow").
+          # A classic PAT with `repo` + `workflow` scope can. Storing it in the
+          # checkout step makes the subsequent `git push` use it too.
+          token: ${{ secrets.BUMP_TOKEN }}
 
       - name: Resolve latest xray release
         id: latest
