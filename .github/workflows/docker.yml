@@ -33,15 +33,21 @@ jobs:
     outputs:
       commit: ${{ steps.v.outputs.commit }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: v
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VER="v26.10.31"
+          # Single source of truth: build.yml owns the pinned Xray version.
+          # docker.yml reads it from there so the two images can never silently
+          # ship a different xray than the release .so (which is what happened
+          # when this value was hardcoded here).
+          VER=$(grep -oP "XRAY_VERSION: '\K[^']+" .github/workflows/build.yml)
+          test -n "$VER" || { echo "could not read XRAY_VERSION from build.yml"; exit 1; }
+          echo "pinned xray version: $VER"
           COMMIT=$(gh api "repos/XTLS/Xray-core/commits/$VER" --jq .sha)
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:

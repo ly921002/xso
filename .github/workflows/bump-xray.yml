@@ -7,7 +7,11 @@ on:
 
 permissions:
   contents: write
-  actions: write   # needed for `gh workflow run` to re-trigger the build
+  actions: write      # needed for `gh workflow run` to re-trigger the build
+  # GITHUB_TOKEN is a GitHub App: modifying any file under .github/workflows/
+  # requires this explicit scope. Without it the push is rejected with
+  # "refusing to allow a GitHub App to create or update workflow ...".
+  workflows: write
 
 jobs:
   bump:
