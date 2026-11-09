@@ -39,12 +39,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Single source of truth: build.yml owns the pinned Xray version.
-          # docker.yml reads it from there so the two images can never silently
-          # ship a different xray than the release .so (which is what happened
-          # when this value was hardcoded here).
-          VER=$(grep -oP "XRAY_VERSION: '\K[^']+" .github/workflows/build.yml)
-          test -n "$VER" || { echo "could not read XRAY_VERSION from build.yml"; exit 1; }
+          # Single source of truth, shared with build.yml and the weekly bump.
+          # A hardcoded version here once let the images ship a different xray
+          # than the release .so without any visible failure.
+          VER=$(tr -d '[:space:]' < config/xray-version.txt)
+          test -n "$VER" || { echo "could not read config/xray-version.txt"; exit 1; }
           echo "pinned xray version: $VER"
           COMMIT=$(gh api "repos/XTLS/Xray-core/commits/$VER" --jq .sha)
           echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"

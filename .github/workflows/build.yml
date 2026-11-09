@@ -18,7 +18,6 @@ permissions:
 env:
   # Single source of truth for the xray version. bump-xray.yml advances this
   # every week to the newest XTLS/Xray-core release tag.
-  XRAY_VERSION: 'v26.10.31'
   # xray currently requires go 1.27 in its go.mod.
   GO_VERSION: '1.27'
   PLUGIN_VERSION: '1.21.11'
@@ -33,12 +32,19 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       commit: ${{ steps.v.outputs.commit }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: v
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VER="${{ github.event.inputs.xray_version }}"
-          if [ -z "$VER" ] || [ "$VER" = "null" ]; then VER="${{ env.XRAY_VERSION }}"; fi
+          # The pin lives in a plain file so the weekly bump can update it with
+          # the ordinary GITHUB_TOKEN (a GitHub App cannot push workflow files).
+          if [ -z "$VER" ] || [ "$VER" = "null" ]; then
+            VER=$(tr -d '[:space:]' < config/xray-version.txt)
+          fi
+          test -n "$VER" || { echo "could not read config/xray-version.txt"; exit 1; }
           echo "resolving xray version: $VER"
           COMMIT=$(gh api "repos/XTLS/Xray-core/commits/$VER" --jq .sha)
           echo "version=$VER" >> "$GITHUB_OUTPUT"

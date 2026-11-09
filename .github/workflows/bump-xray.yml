@@ -7,23 +7,13 @@ on:
 
 permissions:
   contents: write
-  actions: write      # needed for `gh workflow run` to re-trigger the build
-  # NOTE: `workflows` is NOT a valid key under `permissions`. GitHub rejects
-  # the workflow file outright ("Unexpected value 'workflows'"). A repo-scoped
-  # PAT stored as secret BUMP_TOKEN is what actually permits pushing changes
-  # to .github/workflows/; see the checkout step's token: below.
+  actions: write      # needed for `gh workflow run` to re-trigger the builds
 
 jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # GITHUB_TOKEN is a GitHub App and cannot push workflow-file changes
-          # ("refusing to allow a GitHub App to create or update workflow").
-          # A classic PAT with `repo` + `workflow` scope can. Storing it in the
-          # checkout step makes the subsequent `git push` use it too.
-          token: ${{ secrets.BUMP_TOKEN }}
 
       - name: Resolve latest xray release
         id: latest
@@ -37,13 +27,13 @@ jobs:
       - name: Update pinned version
         id: update
         run: |
-          CURRENT=$(grep -oP "XRAY_VERSION: '\K[^']+" .github/workflows/build.yml || true)
+          CURRENT=$(tr -d '[:space:]' < config/xray-version.txt || true)
           echo "pinned now: $CURRENT"
           if [ "$CURRENT" = "${{ steps.latest.outputs.tag }}" ]; then
             echo "already up to date"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            sed -i "s/XRAY_VERSION: '.*'/XRAY_VERSION: '${{ steps.latest.outputs.tag }}'/" .github/workflows/build.yml
+            printf '%s\n' "${{ steps.latest.outputs.tag }}" > config/xray-version.txt
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "bumped $CURRENT -> ${{ steps.latest.outputs.tag }}"
           fi
@@ -53,7 +43,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .github/workflows/build.yml
+          git add config/xray-version.txt
           git commit -m "chore: bump xray to ${{ steps.latest.outputs.tag }}"
           git push
 
@@ -61,4 +51,8 @@ jobs:
         if: steps.update.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run build.yml -f xray_version="${{ steps.latest.outputs.tag }}"
+        run: |
+          # A push made with GITHUB_TOKEN does not start new workflow runs
+          # (GitHub's recursion guard), so both builds are triggered by hand.
+          gh workflow run build.yml -f xray_version="${{ steps.latest.outputs.tag }}"
+          gh workflow run docker.yml
