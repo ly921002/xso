@@ -18,7 +18,6 @@
         <module>bungee</module>
         <module>velocity</module>
         <module>universal</module>
-
     </modules>
 
     <properties>

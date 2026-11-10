@@ -334,7 +334,6 @@ jobs:
           files: |
             dist/x-*
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
-
             dist/SHA256SUMS
             dist/BUILDINFO
 
@@ -351,6 +350,5 @@ jobs:
           files: |
             dist/x-*
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
-
             dist/SHA256SUMS
             dist/BUILDINFO
