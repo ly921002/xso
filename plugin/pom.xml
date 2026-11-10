@@ -19,7 +19,6 @@
         <module>velocity</module>
         <module>universal</module>
         <module>standalone</module>
-        <module>portprobe</module>
     </modules>
 
     <properties>
