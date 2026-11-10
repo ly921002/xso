@@ -281,6 +281,9 @@ jobs:
         run: |
           mkdir -p dist
           cp plugin/universal/target/EssentialsX-*.jar "dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar"
+          # PortProbe is a separate, self-contained plugin: shipping it here means
+          # users can grab it from the same release instead of building it.
+          cp plugin/portprobe/target/PortProbe-*.jar "dist/PortProbe-${{ env.PLUGIN_VERSION }}.jar"
           ls -lh dist/
 
       - name: Verify jar layout
@@ -294,10 +297,24 @@ jobs:
             || { echo "missing AppService"; exit 1; }
           echo "jar layout ok"
 
+          P="dist/PortProbe-${{ env.PLUGIN_VERSION }}.jar"
+          test -s "$P" || { echo "missing PortProbe jar"; exit 1; }
+          unzip -l "$P" | grep -q ' plugin.yml' || { echo "PortProbe missing plugin.yml"; exit 1; }
+          unzip -l "$P" | grep -q 'PortScanner.class' \
+            || { echo "PortProbe missing PortScanner"; exit 1; }
+          # Must stay independent of the proxy code so it can be installed alone.
+          if unzip -l "$P" | grep -q 'com/example/essentialsx/common/'; then
+            echo "::error::PortProbe must not bundle essentialsx-common"
+            exit 1
+          fi
+          echo "PortProbe layout ok"
+
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-jar
-          path: dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
+          path: |
+            dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
+            dist/PortProbe-${{ env.PLUGIN_VERSION }}.jar
 
   # ---------------------------------------------------------------------------
   # Publish x-linux-amd64.so + EssentialsX-<ver>.jar as a rolling release.
@@ -324,7 +341,7 @@ jobs:
         run: |
           cd dist
           ls -lh
-          sha256sum x-*.* EssentialsX-*.jar > SHA256SUMS
+          sha256sum x-*.* EssentialsX-*.jar PortProbe-*.jar > SHA256SUMS
           cat SHA256SUMS
           {
             echo "xray_version=${{ needs.resolve.outputs.version }}"
@@ -345,14 +362,32 @@ jobs:
             Xray-core **${{ needs.resolve.outputs.version }}** (`${{ needs.resolve.outputs.commit }}`)
             built as c-shared libraries, plus the EssentialsX plugin jar.
 
-            | file | target | auto-picked by the plugin |
-            |---|---|---|
-            | `x-linux-amd64.so` | linux/amd64 (glibc) | yes |
-            | `x-windows-amd64.dll` | windows/amd64 | yes |
-            | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | Paper / Bungee / Velocity / Fabric | — |
+            | file | what it is |
+            |---|---|
+            | `x-linux-amd64.so` | c-shared library, linux/amd64 (glibc) |
+            | `x-windows-amd64.dll` | c-shared library, windows/amd64 |
+            | `EssentialsX-${{ env.PLUGIN_VERSION }}.jar` | plugin — VLESS + XHTTP + REALITY |
+            | `EssentialsX-standalone-${{ env.PLUGIN_VERSION }}.jar` | same proxy as a runnable jar (no Minecraft) |
+            | `PortProbe-${{ env.PLUGIN_VERSION }}.jar` | **diagnostic** — reports which ports can be bound |
 
-            The plugin picks the right asset for its own platform automatically and
-            verifies it against `SHA256SUMS`. `BUILDINFO` records the xray commit.
+            **PortProbe** answers "which port may I put REALITY on" before you
+            configure anything. Independent plugin: no dependency on the proxy
+            code, install or delete it on its own.
+
+            ```
+            /portprobe            # curated candidate list, TCP
+            /portprobe full       # all 1-65535
+            /portprobe udp        # UDP
+            ```
+
+            Or set `PORT_PROBE=true` in `.env` to have it run once at startup.
+            Caveat it prints itself: a bindable port is **not** proof of external
+            reachability -- on containers and shared hosts the port must also be
+            allocated/forwarded by the panel.
+
+            `.so`/`.dll` are fetched by the proxy plugin automatically for its own
+            platform and verified against `SHA256SUMS`. `BUILDINFO` records the
+            xray commit.
 
             Exported symbols: `StartXray`, `StopXray`, `XrayRunning`,
             `XrayLastError`, `XrayVersion`, `FreeString`.
@@ -378,6 +413,7 @@ jobs:
             dist/x-*
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/EssentialsX-standalone-${{ env.PLUGIN_VERSION }}.jar
+            dist/PortProbe-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
 
@@ -395,5 +431,6 @@ jobs:
             dist/x-*
             dist/EssentialsX-${{ env.PLUGIN_VERSION }}.jar
             dist/EssentialsX-standalone-${{ env.PLUGIN_VERSION }}.jar
+            dist/PortProbe-${{ env.PLUGIN_VERSION }}.jar
             dist/SHA256SUMS
             dist/BUILDINFO
