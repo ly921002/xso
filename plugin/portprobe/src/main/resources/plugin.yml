@@ -1,0 +1,16 @@
+name: PortProbe
+version: ${project.version}
+main: com.example.essentialsx.portprobe.PortProbePlugin
+api-version: '1.20'
+author: EssentialsX Team
+description: Reports which TCP/UDP ports can be bound on this host.
+website: https://github.com/ly921002/xso
+commands:
+  portprobe:
+    description: Scan for bindable ports
+    usage: /portprobe [tcp|udp] [full]
+    permission: portprobe.use
+permissions:
+  portprobe.use:
+    description: Allows scanning local ports
+    default: op
