@@ -375,7 +375,6 @@ cat ~/mc/world/sub.txt      # Base64 订阅
 | 文档 | 内容 |
 |---|---|
 | [docs/docker.md](docs/docker.md) | 容器镜像的构建、端口、持久化与排错 |
-| [docs/portprobe.md](docs/portprobe.md) | 端口探测插件：哪些端口能绑、以及为什么这不等于外网可达 |
 | [docs/reference.md](docs/reference.md) | C 库接口、JNA 用法、自行构建、CI |
 | [docs/plugin.md](docs/plugin.md) | 插件全部环境变量 |
 | [docs/server-binaries.md](docs/server-binaries.md) | 二进制编译细节 |
