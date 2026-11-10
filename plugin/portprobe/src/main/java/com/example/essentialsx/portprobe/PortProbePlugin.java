@@ -37,6 +37,14 @@ public final class PortProbePlugin extends JavaPlugin {
     /** Set while a scan is running, so repeated commands cannot pile up threads. */
     private final AtomicBoolean running = new AtomicBoolean(false);
 
+    /**
+     * Upper bound on ports printed individually.
+     * <p>
+     * Chosen to keep the answer on one screen; the grouped range summary that
+     * follows carries the rest of the information without the noise.
+     */
+    private static final int MAX_SHOWN_PORTS = 24;
+
     @Override
     public void onEnable() {
         // The proxy plugin reads the same .env; one key is enough here and this
@@ -126,23 +134,39 @@ public final class PortProbePlugin extends JavaPlugin {
                     emit(sender, "[PortProbe] nothing was bindable"
                             + (full ? "" : "; retry with /portprobe " + p.name().toLowerCase(Locale.ROOT) + " full"));
                 } else {
-                    // Wrap so a long list stays readable in a console.
-                    StringBuilder line = new StringBuilder();
+                    // Dumping every free port is useless when nearly all of them
+                    // are free (a container had 628 of 629): it buries the answer
+                    // in dozens of lines and the console cannot be scrolled back.
+                    // Show a bounded sample plus the grouped summary below.
                     int perLine = 12;
-                    int n = 0;
-                    for (int port : hits) {
-                        if (n > 0) {
+                    int shown = Math.min(hits.size(), MAX_SHOWN_PORTS);
+                    StringBuilder line = new StringBuilder();
+                    int inLine = 0;
+                    for (int i = 0; i < shown; i++) {
+                        if (inLine > 0) {
                             line.append(", ");
                         }
-                        line.append(port);
-                        if (++n % perLine == 0) {
+                        line.append(hits.get(i));
+                        if (++inLine == perLine) {
                             emit(sender, "[PortProbe]   " + line);
                             line.setLength(0);
+                            // Reset the counter together with the buffer; leaving
+                            // it running made every following line start with ", ".
+                            inLine = 0;
                         }
                     }
                     if (line.length() > 0) {
                         emit(sender, "[PortProbe]   " + line);
                     }
+                    if (hits.size() > shown) {
+                        emit(sender, "[PortProbe]   ... and " + (hits.size() - shown)
+                                + " more (use /portprobe " + p.name().toLowerCase(Locale.ROOT)
+                                + " full for everything, or check the ranges below)");
+                    }
+
+                    // Ranges are what a human actually needs: "8000-8100 is free"
+                    // answers the question in one line instead of a hundred.
+                    emit(sender, "[PortProbe] free ranges: " + PortScanner.summarize(hits));
                     emit(sender, "[PortProbe] " + PortScanner.caveat());
                 }
             } catch (Throwable e) {

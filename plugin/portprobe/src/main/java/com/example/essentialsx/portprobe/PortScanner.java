@@ -185,6 +185,44 @@ public final class PortScanner {
     }
 
     /**
+     * Collapses a sorted-or-not port list into contiguous ranges.
+     * <p>
+     * The useful answer is almost always a range: "8000-8100 and 20000-20100 are
+     * free" tells someone what to configure, while 628 separate numbers do not.
+     * Runs of length 1 stay as-is so a lone free port is still readable.
+     * <p>
+     * The input is sorted internally, so callers can pass results in scan order.
+     */
+    public static String summarize(List<Integer> ports) {
+        if (ports == null || ports.isEmpty()) {
+            return "(none)";
+        }
+        List<Integer> sorted = new ArrayList<>(ports);
+        java.util.Collections.sort(sorted);
+
+        StringBuilder out = new StringBuilder();
+        int start = sorted.get(0);
+        int prev = start;
+        for (int i = 1; i <= sorted.size(); i++) {
+            int cur = i < sorted.size() ? sorted.get(i) : Integer.MIN_VALUE;
+            boolean ends = i == sorted.size() || cur != prev + 1;
+            if (ends) {
+                if (out.length() > 0) {
+                    out.append(", ");
+                }
+                if (start == prev) {
+                    out.append(start);
+                } else {
+                    out.append(start).append('-').append(prev);
+                }
+                start = cur;
+            }
+            prev = cur;
+        }
+        return out.toString();
+    }
+
+    /**
      * Hint printed next to results.
      * <p>
      * A local bind is necessary, not sufficient. On a container host the port
@@ -231,6 +269,9 @@ public final class PortScanner {
 
         System.out.println();
         System.out.println("tested " + tested + " ports in " + ms + " ms, free: " + hits.size());
+        if (!hits.isEmpty()) {
+            System.out.println("free ranges: " + summarize(hits));
+        }
         if (hits.isEmpty()) {
             System.out.println("none were bindable; every candidate is taken or blocked");
         } else {
